@@ -2,6 +2,16 @@
 .env
 .env.*
 !.env.example
+*credentials*
+*secret*
+*token*
+*.pem
+*.key
+*.p12
+*.pfx
+id_*
+*_host_key
+.ssh/
 
 # caches
 .cache/

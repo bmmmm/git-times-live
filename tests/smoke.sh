@@ -35,15 +35,17 @@ for f in "$LIBDIR"/*.sh; do
     if bash -n "$f" 2>/dev/null; then pass "bash -n lib/$(basename "$f")"; else fail "bash -n lib/$(basename "$f")"; fi
 done
 
-# 2. Source-closure: every `. "$GN_LIB_DIR/<x>"` / `. "$DIR/<x>"` target exists in lib/.
+# 2. Source-closure: every sourced `. "<path>/<x>.sh"` target exists in lib/ —
+#    matches `$GN_LIB_DIR/x`, `$DIR/x`, and the `$(cd …)/x` form alike.
 #    (archive.sh is sourced behind a `[ -f ]` guard and is intentionally absent.)
 miss=0
 while IFS= read -r tgt; do
     [ -z "$tgt" ] && continue
     [ "$tgt" = "archive.sh" ] && continue
     if [ ! -f "$LIBDIR/$tgt" ]; then fail "closure missing: lib/$tgt"; miss=1; fi
-done < <(grep -rhoE '\. "\$(GN_LIB_DIR|DIR)/[A-Za-z0-9_./-]+\.sh"' "$LIBDIR" \
-            | sed -E 's#.*/([A-Za-z0-9_.-]+\.sh)".*#\1#' | sort -u)
+done < <(grep -rhE '(^|[[:space:];&])\. "' "$LIBDIR" 2>/dev/null \
+            | grep -oE '/[A-Za-z0-9_.-]+\.sh"' \
+            | sed -E 's#/([A-Za-z0-9_.-]+\.sh)"#\1#' | sort -u)
 [ "$miss" = 0 ] && pass "source closure complete"
 
 # 2b. Function-reachability: the closure check proves SOURCE FILES exist, but a
