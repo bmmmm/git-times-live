@@ -1,0 +1,32 @@
+# secrets / credentials
+.env
+.env.*
+!.env.example
+*credentials*
+*secret*
+*token*
+*.pem
+*.key
+*.p12
+*.pfx
+id_*
+*_host_key
+.ssh/
+
+# binaries / archives
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.a
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db

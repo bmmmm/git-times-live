@@ -1,0 +1,27 @@
+git-times-live — GENERATED standalone
+source-commit: 6775d756122eba3363080eada495ee93cc683804
+generator: scripts/build-live-dist.sh (git-times)
+marker: do-not-hand-edit-regenerate
+
+copied files:
+  lib/gittimes-lib.sh
+  lib/settings.sh
+  lib/ticker.sh
+  lib/engine.sh
+  lib/layout.sh
+  lib/loader.sh
+  lib/outro.sh
+  lib/render-common.sh
+  lib/live.sh
+  lib/collect-remote.sh
+  lib/collect-forgejo.sh
+  lib/collect-github.sh
+  lib/collect-gitlab.sh
+  git-times-live
+  README.md
+  .env.example
+  .gitignore
+  .claudeignore
+  tests/smoke.sh
+  LICENSE
+  MANIFEST.generated

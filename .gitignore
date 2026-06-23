@@ -1,0 +1,13 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# caches
+.cache/
+tmp/
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db

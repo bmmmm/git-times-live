@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# git-times-live — standalone live broadcast channel for your git activity.
+#
+# GENERATED FILE — do not hand-edit. This entry is emitted by
+# scripts/build-live-dist.sh in the git-times source tree (the single source of
+# truth). Regenerate instead of editing: `scripts/build-live-dist.sh --out DIR`.
+#
+# A tick-driven, full-screen "TV news" channel that polls your repos for new
+# commits (and, with a forge configured, PR/issue events) and shows them as a
+# breaking-news feed under a live clock with a lower-third marquee ticker.
+# It polls git directly — no collect, no cache write — and runs until you quit.
+#
+# Keys:  q quit · r refresh now · p pause · m toggle the lower-third ticker
+#
+# Repo discovery: GIT_TIMES_ROOTS (space-separated roots to scan) plus the repo
+# you launch it from. Forge events need .env config (see .env.example).
+
+set -uo pipefail
+
+# Resolve the real script dir even when invoked through a symlink on PATH, so
+# lib/ is always found (mirrors the git-times entrypoint loop).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [ "${SOURCE#/}" = "$SOURCE" ] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# shellcheck source=lib/gittimes-lib.sh
+. "$DIR/lib/gittimes-lib.sh"
+# live.sh is a sourced-only fragment (no shebang, no set flags) that defines
+# live_broadcast() in this scope — gittimes-lib.sh does NOT source it (in the real
+# git-times the entrypoint sources it directly). Source it here or the call below
+# dies with `live_broadcast: command not found`.
+# shellcheck source=lib/live.sh
+. "$GN_LIB_DIR/live.sh"
+
+# Globals live_broadcast() reads from the dispatch scope (see lib/live.sh header).
+# Mirror the names + defaults the git-times entrypoint sets in parse_opts.
+TF=7d; SCOPE=both; AUTHORS=""; NOW=""; WIDTH=0; HIGHLIGHT=""; THEME=""; WANT_COLOR=1
+
+usage() {
+    cat <<'EOF'
+git-times-live — live broadcast channel for your git activity
+
+Usage: git-times-live [options]
+
+Options:
+  --scope local|remote|both   data sources (default: both; "forgejo" = remote alias)
+  --authors <regex|@me>       only matching commit authors (@me = the repo identity)
+  --mine                      shorthand for --authors @me
+  --theme <name>              accent palette (neon|dracula|gruvbox|matrix|miami|tokyo|ember|uwu|mono)
+  --highlight on|off          accent repo headings + commit-type dots
+  --width N                   force a render width (0 = fit the terminal)
+  --no-color                  disable colour
+  -h, --help                  this help
+      --version               print the generator commit and exit
+
+Keys (while running):  q quit · r refresh now · p pause · m toggle ticker
+
+Repo discovery:
+  GIT_TIMES_ROOTS   space-separated roots to scan for repos (plus the cwd repo)
+
+Tunables (seconds unless noted):
+  GIT_TIMES_LIVE_INTERVAL          local commit poll cadence (default 10)
+  GIT_TIMES_LIVE_TICK              display tick / marquee step (default 0.25)
+  GIT_TIMES_LIVE_LOOKBACK          startup backfill window (default 86400)
+  GIT_TIMES_LIVE_FLASH             BREAKING banner flash duration (default 6)
+  GIT_TIMES_LIVE_FEED_MAX          max items kept on the wire (default 60)
+  GIT_TIMES_LIVE_REMOTE_INTERVAL   remote PR/issue poll cadence (default 90)
+  GIT_TIMES_LIVE_TICKER            start with the ticker running (on|off, default off)
+
+Forge config (PR/issue events) goes in .env — see .env.example for placeholders.
+EOF
+}
+
+version() {
+    if [ -f "$DIR/MANIFEST.generated" ]; then
+        local h
+        h="$(awk -F': ' '/^source-commit:/{print $2; exit}' "$DIR/MANIFEST.generated")"
+        printf 'git-times-live (generated from git-times %s)\n' "${h:-unknown}"
+    else
+        printf 'git-times-live (generated from git-times unknown)\n'
+    fi
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --scope)
+            gn_need_val "$1" $#
+            SCOPE="${2:-both}"; [ "$SCOPE" = forgejo ] && SCOPE=remote
+            case "$SCOPE" in
+                local|remote|both) ;;
+                *) printf 'git-times-live: unknown --scope %q (use: local | remote | both; "forgejo" = remote).\n' "$SCOPE" >&2; exit 2 ;;
+            esac
+            shift 2 ;;
+        --authors)   gn_need_val "$1" $#; AUTHORS="${2:-}"; shift 2 ;;
+        --mine)      AUTHORS="@me"; shift ;;
+        --no-color)  WANT_COLOR=0; shift ;;
+        --theme)     gn_need_val "$1" $#; THEME="${2:-}"; shift 2 ;;
+        --width)     gn_need_val "$1" $#; WIDTH="${2:-0}"; shift 2 ;;
+        --highlight) gn_need_val "$1" $#; HIGHLIGHT="${2:-}"; shift 2 ;;
+        -h|--help)   usage; exit 0 ;;
+        --version)   version; exit 0 ;;
+        *)           shift ;;
+    esac
+done
+
+# WIDTH feeds layout arithmetic — reject non-numeric garbage to 0 (fit to terminal).
+case "$WIDTH" in ''|*[!0-9]*) WIDTH=0 ;; esac
+
+THEME="$(gn_theme_resolve "$THEME")"
+gn_color_init "$WANT_COLOR" "$THEME"
+live_broadcast
