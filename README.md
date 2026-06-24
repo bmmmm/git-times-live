@@ -46,6 +46,11 @@ ln -s "$PWD/git-times-live" ~/.local/bin/git-times-live
 | `t` | toggle the A.I. desk (inline tokens) |
 | `c` | toggle the churn column (per-commit Δ) |
 
+The `t` and `c` toggles are **remembered across runs**: their on/off state is saved
+under `GIT_TIMES_HOME` (default `~/.cache/git-times`) and resumed on the next launch,
+so the channel comes back the way you left it. An explicit `GIT_TIMES_LIVE_TOKENS` or
+`GIT_TIMES_LIVE_CHURN` at launch still wins as a one-off override.
+
 ## Configuration
 
 Repo discovery and behaviour are env-driven:

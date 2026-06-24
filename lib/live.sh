@@ -65,21 +65,44 @@ live_broadcast() {
     # reader's, and the live channel wants its own one-key control over just the ticker.
     local LV_MARQUEE=0
     case "${GIT_TIMES_LIVE_TICKER:-}" in 1|on|true|yes) LV_MARQUEE=1 ;; esac
+    # Persisted toggle state — the A.I. desk (t) and churn column (c) resume across
+    # runs. A tiny key=value file under GIT_TIMES_HOME, written on every toggle (so it
+    # survives even a hard kill, no reliance on the exit trap) and read here at startup.
+    # Precedence: an explicit launch env (GIT_TIMES_LIVE_TOKENS / _CHURN, set to ANY
+    # value incl. off) wins as a per-launch override; the file is only the resume
+    # default when that env is unset. Unknown/garbage stored values fail soft to off.
+    local LV_STATE_FILE="${GIT_TIMES_HOME:-$HOME/.cache/git-times}/live-state"
+    local _lv_seen_tokens="" _lv_seen_churn="" _lv_k="" _lv_v=""
+    if [ -r "$LV_STATE_FILE" ]; then
+        while IFS='=' read -r _lv_k _lv_v; do
+            case "$_lv_k" in
+                tokens) _lv_seen_tokens="$_lv_v" ;;
+                churn)  _lv_seen_churn="$_lv_v" ;;
+            esac
+        done < "$LV_STATE_FILE"
+    fi
+
     # The A.I. desk (inline per-repo assistant tokens) is an opt-in module, off by
     # default — it is the only jq consumer and not every channel wants it. t toggles
-    # it live; GIT_TIMES_LIVE_TOKENS=on starts it on. Its async usage collect runs on
-    # its own (slower) cadence — the transcript parse is heavier than a git-log sweep.
+    # it live; GIT_TIMES_LIVE_TOKENS=on starts it on (and the toggle is persisted). Its
+    # async usage collect runs on its own (slower) cadence — the transcript parse is
+    # heavier than a git-log sweep.
     local LV_TOKENS=0
-    case "${GIT_TIMES_LIVE_TOKENS:-}" in 1|on|true|yes) LV_TOKENS=1 ;; esac
+    if [ -n "${GIT_TIMES_LIVE_TOKENS:-}" ]; then
+        case "$GIT_TIMES_LIVE_TOKENS" in 1|on|true|yes) LV_TOKENS=1 ;; esac
+    elif [ "$_lv_seen_tokens" = 1 ]; then LV_TOKENS=1; fi
     local LV_TOKENS_INTERVAL
     LV_TOKENS_INTERVAL="${GIT_TIMES_LIVE_TOKENS_INTERVAL:-60}"; case "$LV_TOKENS_INTERVAL" in ''|*[!0-9]*) LV_TOKENS_INTERVAL=60 ;; esac
     # The churn column (inline per-commit Δ lines touched) is its OWN opt-in module,
     # independent of the A.I. desk — pure git, no jq. c toggles it live;
-    # GIT_TIMES_LIVE_CHURN=on starts it on. Churn is captured at poll regardless of
-    # this flag (always cheap, bounded by the lookback), so the flag gates only the
-    # render — flipping it on shows every visible commit's churn immediately.
+    # GIT_TIMES_LIVE_CHURN=on starts it on (and the toggle is persisted). Churn is
+    # captured at poll regardless of this flag (always cheap, bounded by the lookback),
+    # so the flag gates only the render — flipping it on shows every visible commit's
+    # churn immediately.
     local LV_CHURN_ON=0
-    case "${GIT_TIMES_LIVE_CHURN:-}" in 1|on|true|yes) LV_CHURN_ON=1 ;; esac
+    if [ -n "${GIT_TIMES_LIVE_CHURN:-}" ]; then
+        case "$GIT_TIMES_LIVE_CHURN" in 1|on|true|yes) LV_CHURN_ON=1 ;; esac
+    elif [ "$_lv_seen_churn" = 1 ]; then LV_CHURN_ON=1; fi
 
     # ── palette state (gn_color_init ran in the dispatch) ─────────────────────
     local COLOR=0; [ -n "$GN_R" ] && COLOR=1
@@ -112,6 +135,17 @@ live_broadcast() {
     # they are built once per state change (poll/pause/resize/flash flip) instead of every
     # heartbeat — LV_CHROME_DIRTY marks them stale. This keeps the per-tick frame fork-free.
     local LV_FLASHON=0 LV_CHROME_DIRTY=1 LV_BANNER_INNER="" LV_BANNER_SP="" LV_BANNER_COL="" LV_BANNER_TAG="" LV_STATUS="" LV_MAST_L="" LV_MAST_GAP="" LV_COLHEAD=""
+
+    # Persist the live toggle states (A.I. desk + churn) so the next launch resumes
+    # them. Called from the t/c handlers right after a flip — cheap and rare (a user
+    # keypress), and writing on the toggle (not just at exit) means even a hard kill
+    # keeps the choice. mkdir -p covers a never-collected GIT_TIMES_HOME; all-soft on
+    # error (a non-writable home just loses persistence, never breaks the channel).
+    _live_state_save() {
+        local dir="${LV_STATE_FILE%/*}"
+        [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 0
+        printf 'tokens=%s\nchurn=%s\n' "$LV_TOKENS" "$LV_CHURN_ON" > "$LV_STATE_FILE" 2>/dev/null || return 0
+    }
 
     # ── geometry: fill the terminal, cap the column, cache the pad + rule ──────
     # Recomputed only on resize (SIGWINCH sets LV_RESIZE), never per tick — so the
@@ -785,12 +819,14 @@ EOF
                      printf -v now '%(%s)T' -1
                      [ -z "$LV_TOK_PID" ] && { _live_tokens_start "$(( now - LV_LOOKBACK ))" "$now"; last_tokens="$now"; }
                  fi
+                 _live_state_save             # resume this choice on the next launch
                  LV_RESIZE=1 ;;   # resize path recomputes geometry + full clear next pass
             c|C) # toggle the churn column — pure git, independent of the A.I. desk. The
                  # inline Δchurn cell appears/disappears, so the body width changes:
                  # re-lay-out (re-render + full clear), no row shift. Churn is captured at
                  # poll regardless, so toggling on shows every visible commit at once.
                  if [ "$LV_CHURN_ON" = 1 ]; then LV_CHURN_ON=0; else LV_CHURN_ON=1; fi
+                 _live_state_save             # resume this choice on the next launch
                  LV_RESIZE=1 ;;
             *) : ;;
         esac

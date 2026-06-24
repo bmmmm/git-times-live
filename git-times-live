@@ -65,6 +65,10 @@ Options:
 
 Keys (while running):  q quit · r refresh now · p pause · m toggle ticker · t A.I. desk · c churn
 
+The t and c toggles are remembered across runs (saved under GIT_TIMES_HOME, default
+~/.cache/git-times) and resumed on the next launch; an explicit GIT_TIMES_LIVE_TOKENS
+or GIT_TIMES_LIVE_CHURN at launch still wins as a one-off override.
+
 Repo discovery:
   GIT_TIMES_ROOTS   space-separated roots to scan for repos (plus the cwd repo)
 
