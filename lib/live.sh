@@ -27,8 +27,10 @@
 #
 # The A.I. desk is an OPTIONAL module (off by default — not every channel wants
 # it). When on (env or the `t` key), each feed line gains an inline token column
-# right of the repo name — that repo total assistant tokens over the window, read
-# from the same Claude Code transcripts as the reader A.I. desk. It is the ONE jq
+# right of the repo name — that repo total assistant tokens over the window — plus
+# a green "+growth" tag: how much the repo has gained since the desk was enabled, so
+# you watch each project consume tokens live. Both read from the same Claude Code
+# transcripts as the reader A.I. desk. It is the ONE jq
 # consumer here, and only while enabled: the usage collect runs ASYNC on its own
 # cadence (like the forge poll), so the clock never stalls, and when the module is
 # off NO jq ever runs — the channel stays pure git. Fail-soft: no jq or no
@@ -78,11 +80,15 @@ live_broadcast() {
     local LV_REMOTE_PID="" LV_REMOTE_PF="" remote_backfill=0
     # A.I. desk async-poll state: a finished collect lands "repo<US>tokens" rows in
     # LV_TOK_ROWS, which _live_tokens_build indexes into LV_TOK_MAP (repo -> humanized
-    # total) — the lookup the feed renderer reads to print each commit its inline token
-    # column, right of the repo name.
-    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_READY=0
+    # window total) and LV_TOK_CUR (repo -> raw total) — the lookup the feed renderer
+    # reads to print each commit its inline token column, right of the repo name.
+    # LV_TOK_BASE freezes the raw totals at the first collect after the desk is enabled
+    # (the session baseline); LV_TOK_DELTA (repo -> humanized "+growth") is current minus
+    # baseline, shown green beside the total so you watch each repo grow live. Only set
+    # while LV_TOK_BASELINED=1 and the growth is positive.
+    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_READY=0 LV_TOK_BASELINED=0
     local -a LV_TOK_ROWS=()
-    local -A LV_TOK_MAP=()
+    local -A LV_TOK_MAP=() LV_TOK_CUR=() LV_TOK_BASE=() LV_TOK_DELTA=()
     # Cached chrome: the banner inner + status bar measure non-ASCII glyphs (·/◉), so
     # they are built once per state change (poll/pause/resize/flash flip) instead of every
     # heartbeat — LV_CHROME_DIRTY marks them stale. This keeps the per-tick frame fork-free.
@@ -303,6 +309,18 @@ live_broadcast() {
         [ -n "$LV_TOK_PF" ] && rm -f "$LV_TOK_PF" 2>/dev/null
         LV_TOK_PF=""; LV_TOK_READY=1
         _live_tokens_build
+        # Freeze the session baseline on the FIRST real collect after the desk is enabled,
+        # so the "+Δ" tag measures growth since you started watching, not the whole 24h
+        # window. Done here (a genuine collect), not in _live_tokens_build (which also runs
+        # from the toggle path over stale cached rows) — else the baseline would anchor to
+        # an old, pre-enable total. _live_tokens_build computed no deltas this pass (still
+        # un-baselined); the next collect is the first to show growth.
+        if [ "$LV_TOK_BASELINED" = 0 ]; then
+            local rep
+            LV_TOK_BASE=()
+            for rep in "${!LV_TOK_CUR[@]}"; do LV_TOK_BASE[$rep]="${LV_TOK_CUR[$rep]}"; done
+            LV_TOK_BASELINED=1
+        fi
         # New token totals → repaint the feed so the inline columns refresh. Skip while
         # paused (the feed is frozen); the unpause path re-renders. The map still updates,
         # so it is current the instant the channel resumes.
@@ -318,21 +336,30 @@ live_broadcast() {
         elif [ "$n" -lt 1000000000 ]; then printf -v "$__ov" '%d.%dM' "$((n/1000000))" "$(((n%1000000)/100000))"
         else printf -v "$__ov" '%d.%dB' "$((n/1000000000))" "$(((n%1000000000)/100000000))"; fi
     }
-    # Index the latest A.I.-desk rows into LV_TOK_MAP (repo -> humanized token total) —
-    # the lookup _live_render_feed reads to print each commit its inline token column.
-    # Run on reap/toggle only; CW-independent (no fitting), so a resize need not rebuild
-    # it. A row with a zero / non-numeric total is dropped, so a repo with no assistant
-    # usage simply has no map entry and the renderer leaves its column blank.
+    # Index the latest A.I.-desk rows into LV_TOK_MAP (repo -> humanized total), LV_TOK_CUR
+    # (repo -> raw total) and LV_TOK_DELTA (repo -> humanized "+growth" since the session
+    # baseline) — the lookups _live_render_feed reads for each commit's inline token column
+    # plus its green growth tag. Run on reap/toggle only; CW-independent (no fitting), so a
+    # resize need not rebuild it. A row with a zero / non-numeric total is dropped, so a
+    # repo with no assistant usage has no map entry and the renderer leaves its column blank.
     _live_tokens_build() {
-        LV_TOK_MAP=()
-        local rep tok ftok rec i n="${#LV_TOK_ROWS[@]}"
+        LV_TOK_MAP=(); LV_TOK_CUR=(); LV_TOK_DELTA=()
+        local rep tok ftok fdel d rec i n="${#LV_TOK_ROWS[@]}"
         for (( i=0; i<n; i++ )); do
             rec="${LV_TOK_ROWS[$i]}"
             rep="${rec%%"$GN_US"*}"; tok="${rec##*"$GN_US"}"
             case "$tok" in ''|*[!0-9]*) tok=0 ;; esac
             [ "$tok" -gt 0 ] || continue
+            LV_TOK_CUR[$rep]="$tok"
             _live_fmt_tok ftok "$tok"
             LV_TOK_MAP[$rep]="$ftok"
+            # growth since the session baseline (a repo new this session has no baseline
+            # entry → its whole total counts as growth). Only once baselined and positive;
+            # a window that slides old spend out can go negative — shown as no tag.
+            if [ "$LV_TOK_BASELINED" = 1 ]; then
+                d=$(( tok - ${LV_TOK_BASE[$rep]:-0} ))
+                if [ "$d" -gt 0 ]; then _live_fmt_tok fdel "$d"; LV_TOK_DELTA[$rep]="+$fdel"; fi
+            fi
         done
     }
 
@@ -384,18 +411,20 @@ EOF
             esac
             rp="$(gn_pad "$repo" 14)"
             if [ "$LV_TOKENS" = 1 ]; then
-                # A.I. desk inline: this repo window token total, right-aligned in a 6-col
-                # field (figures top out at ~"999.9k"/"12.3M"), GN_YEL like a spend tag.
-                # Blank when the repo has no assistant usage or the first collect is not in
-                # yet. Costs the body 7 cols (6 figure + 1 separating space) vs the no-token
-                # layout, so the column never overlaps the subject. The map total is per repo
-                # over the whole window, so every line of a repo carries the same figure.
-                bmax=$(( CW - 30 )); [ "$bmax" -lt 1 ] && bmax=1   # +7 over the 23-col no-token floor
+                # A.I. desk inline: this repo window token total (GN_YEL spend tag, 6-col
+                # right) plus a GN_GRN "+growth" since the desk was enabled (LV_TOK_DELTA,
+                # 7-col left, blank when flat). Both are per-repo window figures, so every
+                # line of a repo carries the same pair. Blank when the repo has no assistant
+                # usage or the first collect is not in yet. Costs the body 15 cols over the
+                # no-token layout (6 total +1 +7 delta +1), so the columns never overlap the
+                # subject.
+                bmax=$(( CW - 38 )); [ "$bmax" -lt 1 ] && bmax=1   # +15 over the 23-col no-token floor
                 body="$(gn_truncate "$text" "$bmax")"
-                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%s%s' \
+                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%-7s%s %s%s%s' \
                     "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
                     "$GN_B" "$rp" "$GN_R" \
                     "$GN_YEL" "${LV_TOK_MAP[$repo]:-}" "$GN_R" \
+                    "$GN_GRN" "${LV_TOK_DELTA[$repo]:-}" "$GN_R" \
                     "$GN_DIM" "$body" "$GN_R")")
             else
                 bmax=$(( CW - 23 )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1; floor 1 so a narrow CW shrinks the body, never wraps the row
@@ -654,7 +683,11 @@ EOF
                  # feed body width changes — re-lay-out (re-render + full clear), no row shift
                  if [ "$LV_TOKENS" = 1 ]; then LV_TOKENS=0
                  else
-                     LV_TOKENS=1; _live_tokens_build   # index any cached rows into the map now
+                     # re-arm the session baseline so "+Δ" growth restarts from this enable,
+                     # not from a stale earlier on-period. The cached build below shows the
+                     # totals immediately but no deltas (un-baselined); the kicked collect is
+                     # the first to re-freeze the baseline and start counting growth.
+                     LV_TOKENS=1; LV_TOK_BASELINED=0; _live_tokens_build   # index any cached rows now
                      # kick a first poll now so the columns fill without waiting a full cadence
                      printf -v now '%(%s)T' -1
                      [ -z "$LV_TOK_PID" ] && { _live_tokens_start "$(( now - LV_LOOKBACK ))" "$now"; last_tokens="$now"; }

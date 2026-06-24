@@ -77,6 +77,11 @@ total, so every line of a repo carries the same count. It is the only part of
 the channel that uses **jq** — and only while the module is on; off, the channel
 stays pure git.
 
+Right of the total, a green **`+growth`** tag shows how much that repo has gained
+since you enabled the desk — the live delta against a baseline frozen at the first
+collect after `t` (or launch). So you watch each project consume tokens in real
+time. It is blank when the repo has not grown since you started watching.
+
 Toggle it live with `t`, or start it on with `GIT_TIMES_LIVE_TOKENS=on`. The
 usage collect runs asynchronously on its own cadence so the clock never stalls.
 Fail-soft: no jq or no transcripts → the columns just stay blank.
