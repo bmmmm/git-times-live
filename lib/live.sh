@@ -22,16 +22,17 @@
 #   GIT_TIMES_LIVE_FEED_MAX   max items kept on the wire (default 60)
 #   GIT_TIMES_LIVE_REMOTE_INTERVAL  remote (PR/issue) poll cadence, seconds (default 90)
 #   GIT_TIMES_LIVE_TICKER     start with the lower-third marquee running (default off)
-#   GIT_TIMES_LIVE_TOKENS     show the A.I. desk panel — per-repo assistant tokens (default off)
+#   GIT_TIMES_LIVE_TOKENS     show the A.I. desk — inline per-repo assistant tokens (default off)
 #   GIT_TIMES_LIVE_TOKENS_INTERVAL  assistant-usage poll cadence, seconds (default 60)
 #
-# The A.I. desk panel is an OPTIONAL module (off by default — not every channel
-# wants it). When on (env or the `t` key), a per-repo "tokens used" strip rides
-# below the feed, sourced from the same Claude Code transcripts as the reader's
-# A.I. desk. It is the ONE jq consumer here, and only while enabled: the usage
-# collect runs ASYNC on its own cadence (like the forge poll), so the clock never
-# stalls, and when the module is off NO jq ever runs — the channel stays pure git.
-# "If present" is fail-soft: no jq or no transcripts → the panel reads as quiet.
+# The A.I. desk is an OPTIONAL module (off by default — not every channel wants
+# it). When on (env or the `t` key), each feed line gains an inline token column
+# right of the repo name — that repo total assistant tokens over the window, read
+# from the same Claude Code transcripts as the reader A.I. desk. It is the ONE jq
+# consumer here, and only while enabled: the usage collect runs ASYNC on its own
+# cadence (like the forge poll), so the clock never stalls, and when the module is
+# off NO jq ever runs — the channel stays pure git. Fail-soft: no jq or no
+# transcripts → the columns simply stay blank, never an error.
 # Reads the parse_opts globals in scope: TF, SCOPE, AUTHORS, NOW, WIDTH, the GN_*
 # palette (gn_color_init, called by the dispatch) and everything gittimes-lib.sh
 # provides — bash dynamic scoping, the house pattern, like reader.sh.
@@ -54,7 +55,7 @@ live_broadcast() {
     # reader's, and the live channel wants its own one-key control over just the ticker.
     local LV_MARQUEE=0
     case "${GIT_TIMES_LIVE_TICKER:-}" in 1|on|true|yes) LV_MARQUEE=1 ;; esac
-    # The A.I. desk panel (per-repo assistant tokens) is an opt-in module, off by
+    # The A.I. desk (inline per-repo assistant tokens) is an opt-in module, off by
     # default — it is the only jq consumer and not every channel wants it. t toggles
     # it live; GIT_TIMES_LIVE_TOKENS=on starts it on. Its async usage collect runs on
     # its own (slower) cadence — the transcript parse is heavier than a git-log sweep.
@@ -76,9 +77,12 @@ live_broadcast() {
     local _stty_saved="" last_local=0 last_remote=0 flash_until=0 now=0 key="" paused=0
     local LV_REMOTE_PID="" LV_REMOTE_PF="" remote_backfill=0
     # A.I. desk async-poll state: a finished collect lands "repo<US>tokens" rows in
-    # LV_TOK_ROWS, which _live_tokens_build renders into the cached LV_TOK_LINE strip.
-    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_READY=0 LV_TOK_LINE=""
+    # LV_TOK_ROWS, which _live_tokens_build indexes into LV_TOK_MAP (repo -> humanized
+    # total) — the lookup the feed renderer reads to print each commit its inline token
+    # column, right of the repo name.
+    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_READY=0
     local -a LV_TOK_ROWS=()
+    local -A LV_TOK_MAP=()
     # Cached chrome: the banner inner + status bar measure non-ASCII glyphs (·/◉), so
     # they are built once per state change (poll/pause/resize/flash flip) instead of every
     # heartbeat — LV_CHROME_DIRTY marks them stale. This keeps the per-tick frame fork-free.
@@ -102,11 +106,11 @@ live_broadcast() {
         # fixed-height frame. Clamp to the real width — a cramped channel beats a broken one.
         [ "$CW" -gt "$COLS" ] && CW="$COLS"
         PAD="$(gn_center_pad "$COLS" "$CW")"
-        # chrome rows: masthead+rule+banner+rule+status = 5, +1 per optional strip
-        # (the marquee and the A.I. desk panel each cost the feed one row when on).
+        # chrome rows: masthead+rule+banner+rule+status = 5, +1 for the marquee when on.
+        # The A.I. desk costs NO chrome row — its tokens ride inline in each feed line, so
+        # toggling it changes column layout (re-render + clear), never the feed height.
         local chrome=5
         [ "$LV_MARQUEE" = 1 ] && chrome=$(( chrome + 1 ))
-        [ "$LV_TOKENS"  = 1 ] && chrome=$(( chrome + 1 ))
         BODY=$(( LINES - chrome )); [ "$BODY" -lt 1 ] && BODY=1
         printf -v PADS '%*s' "$PAD" ''
         printf -v HRULE '%*s' "$CW" ''; HRULE="${HRULE// /─}"
@@ -299,6 +303,10 @@ live_broadcast() {
         [ -n "$LV_TOK_PF" ] && rm -f "$LV_TOK_PF" 2>/dev/null
         LV_TOK_PF=""; LV_TOK_READY=1
         _live_tokens_build
+        # New token totals → repaint the feed so the inline columns refresh. Skip while
+        # paused (the feed is frozen); the unpause path re-renders. The map still updates,
+        # so it is current the instant the channel resumes.
+        [ "$paused" = 0 ] && _live_render_feed
         return 0
     }
     # Humanize a token count to k/M/B into <outvar> (counts reach millions; an
@@ -310,31 +318,22 @@ live_broadcast() {
         elif [ "$n" -lt 1000000000 ]; then printf -v "$__ov" '%d.%dM' "$((n/1000000))" "$(((n%1000000)/100000))"
         else printf -v "$__ov" '%d.%dB' "$((n/1000000000))" "$(((n%1000000000)/100000000))"; fi
     }
-    # Build the cached A.I. desk strip (LV_TOK_LINE) from LV_TOK_ROWS, fit to CW. Run
-    # on reap/resize/toggle only — NEVER on the heartbeat (the frame reuses the cache).
-    # Caps at 12 repos so a huge set never builds a giant string before the CW truncate.
+    # Index the latest A.I.-desk rows into LV_TOK_MAP (repo -> humanized token total) —
+    # the lookup _live_render_feed reads to print each commit its inline token column.
+    # Run on reap/toggle only; CW-independent (no fitting), so a resize need not rebuild
+    # it. A row with a zero / non-numeric total is dropped, so a repo with no assistant
+    # usage simply has no map entry and the renderer leaves its column blank.
     _live_tokens_build() {
-        local body="" rep tok ftok rec i n="${#LV_TOK_ROWS[@]}" shown=0
-        for (( i=0; i<n && shown<12; i++ )); do
+        LV_TOK_MAP=()
+        local rep tok ftok rec i n="${#LV_TOK_ROWS[@]}"
+        for (( i=0; i<n; i++ )); do
             rec="${LV_TOK_ROWS[$i]}"
             rep="${rec%%"$GN_US"*}"; tok="${rec##*"$GN_US"}"
             case "$tok" in ''|*[!0-9]*) tok=0 ;; esac
+            [ "$tok" -gt 0 ] || continue
             _live_fmt_tok ftok "$tok"
-            if [ "$shown" -eq 0 ]; then body="${rep} ${ftok}"; else body="${body} · ${rep} ${ftok}"; fi
-            shown=$(( shown + 1 ))
+            LV_TOK_MAP[$rep]="$ftok"
         done
-        if [ "$n" -eq 0 ]; then
-            # An honest empty-desk line. A missing jq is the one case "collecting…" would
-            # lie about (the poll is a no-op without it), so name it — and make it actionable.
-            if ! command -v jq >/dev/null 2>&1; then body="needs jq to read assistant usage — not found on PATH"
-            elif [ "$LV_TOK_READY" = 1 ]; then body="no assistant activity in the window"
-            else body="collecting assistant usage…"; fi
-        fi
-        local inner; inner=" A.I. · ${body} "
-        inner="$(gn_truncate "$inner" "$CW")"
-        local w sp g; gn_strwidth_v w "$inner"; g=$(( CW - w )); [ "$g" -lt 0 ] && g=0
-        printf -v sp '%*s' "$g" ''
-        LV_TOK_LINE="${GN_DIM}${inner}${sp}${GN_R}"
     }
 
     # A thin dim divider marking a calendar-day rollover in the feed. The 24h backfill
@@ -384,11 +383,27 @@ EOF
                 *)      tcol="$GN_DIM"; glyph='▌' ;;
             esac
             rp="$(gn_pad "$repo" 14)"
-            bmax=$(( CW - 23 )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1; floor 1 so a narrow CW shrinks the body, never wraps the row
-            body="$(gn_truncate "$text" "$bmax")"
-            LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%s%s' \
-                "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
-                "$GN_B" "$rp" "$GN_R" "$GN_DIM" "$body" "$GN_R")")
+            if [ "$LV_TOKENS" = 1 ]; then
+                # A.I. desk inline: this repo window token total, right-aligned in a 6-col
+                # field (figures top out at ~"999.9k"/"12.3M"), GN_YEL like a spend tag.
+                # Blank when the repo has no assistant usage or the first collect is not in
+                # yet. Costs the body 7 cols (6 figure + 1 separating space) vs the no-token
+                # layout, so the column never overlaps the subject. The map total is per repo
+                # over the whole window, so every line of a repo carries the same figure.
+                bmax=$(( CW - 30 )); [ "$bmax" -lt 1 ] && bmax=1   # +7 over the 23-col no-token floor
+                body="$(gn_truncate "$text" "$bmax")"
+                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%s%s' \
+                    "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
+                    "$GN_B" "$rp" "$GN_R" \
+                    "$GN_YEL" "${LV_TOK_MAP[$repo]:-}" "$GN_R" \
+                    "$GN_DIM" "$body" "$GN_R")")
+            else
+                bmax=$(( CW - 23 )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1; floor 1 so a narrow CW shrinks the body, never wraps the row
+                body="$(gn_truncate "$text" "$bmax")"
+                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%s%s' \
+                    "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
+                    "$GN_B" "$rp" "$GN_R" "$GN_DIM" "$body" "$GN_R")")
+            fi
             n=$(( n + 1 ))
         done
         LV_CHROME_DIRTY=1   # feed changed: the banner body + status wire-count need a rebuild
@@ -516,11 +531,6 @@ EOF
         done
         # rule
         out+="${PADS}${GN_FAINT}${HRULE}${GN_R}"$'\033[K\n'
-        # A.I. desk strip — the cached per-repo token line (rebuilt only on reap/resize/
-        # toggle), painted only while the module is on. Reuses the cache; no heartbeat fork.
-        if [ "$LV_TOKENS" = 1 ]; then
-            out+="${PADS}${LV_TOK_LINE}"$'\033[K\n'
-        fi
         # marquee (lower third) — fork-free window of the looping ticker, painted only
         # while the ticker runs (m toggles it; off by default for a calmer channel).
         if [ "$LV_MARQUEE" = 1 ]; then
@@ -551,7 +561,6 @@ EOF
     # take a moment on a large set; a blank alt screen while it runs reads as a hang, so
     # show the channel is up. The backfilled feed lands on the next loop pass.
     _live_geometry; _live_render_feed; _live_ticker_build
-    [ "$LV_TOKENS" = 1 ] && _live_tokens_build   # seed the strip ("collecting…") before the first paint
     _live_frame
     [ "$SCOPE" != remote ] && _live_poll_local "$(( now - LV_LOOKBACK ))"
     last_local="$now"
@@ -573,8 +582,7 @@ EOF
     while :; do
         if [ "$LV_RESIZE" = 1 ]; then
             _live_geometry; _live_render_feed; _live_ticker_build
-            [ "$LV_TOKENS" = 1 ] && _live_tokens_build   # CW changed: re-fit the A.I. strip
-            LV_RESIZE=0
+            LV_RESIZE=0   # the token map is CW-independent; _live_render_feed above re-reads it
             printf '\033[2J'   # one full clear on (re)size; steady frames overwrite in place
         fi
         _live_frame
@@ -642,11 +650,12 @@ EOF
             m|M) # toggle the lower-third ticker; the row count changes, so re-lay-out
                  if [ "$LV_MARQUEE" = 1 ]; then LV_MARQUEE=0; else LV_MARQUEE=1; fi
                  LV_RESIZE=1 ;;   # resize path recomputes geometry + full clear next pass
-            t|T) # toggle the A.I. desk panel; the row count changes, so re-lay-out
+            t|T) # toggle the A.I. desk; the inline token column appears/disappears, so the
+                 # feed body width changes — re-lay-out (re-render + full clear), no row shift
                  if [ "$LV_TOKENS" = 1 ]; then LV_TOKENS=0
                  else
-                     LV_TOKENS=1; _live_tokens_build   # seed the strip (shows cached rows, or "collecting…")
-                     # kick a first poll now so the desk fills without waiting a full cadence
+                     LV_TOKENS=1; _live_tokens_build   # index any cached rows into the map now
+                     # kick a first poll now so the columns fill without waiting a full cadence
                      printf -v now '%(%s)T' -1
                      [ -z "$LV_TOK_PID" ] && { _live_tokens_start "$(( now - LV_LOOKBACK ))" "$now"; last_tokens="$now"; }
                  fi
