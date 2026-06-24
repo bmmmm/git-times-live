@@ -41,7 +41,8 @@
 # GIT_TIMES_LIVE_CHURN), independent of the A.I. desk: a cyan "Δchurn" showing that
 # commit's own lines touched (adds+dels) — the one PER-COMMIT figure on the row,
 # exact and pure git (no jq), captured once at poll. Each desk/churn block is toggled
-# on its own; the feed body width tracks whichever blocks are showing.
+# on its own; the feed body width tracks whichever blocks are showing. When a block is
+# on, a color-matched header row labels the active columns (the legend).
 # Reads the parse_opts globals in scope: TF, SCOPE, AUTHORS, NOW, WIDTH, the GN_*
 # palette (gn_color_init, called by the dispatch) and everything gittimes-lib.sh
 # provides — bash dynamic scoping, the house pattern, like reader.sh.
@@ -110,7 +111,7 @@ live_broadcast() {
     # Cached chrome: the banner inner + status bar measure non-ASCII glyphs (·/◉), so
     # they are built once per state change (poll/pause/resize/flash flip) instead of every
     # heartbeat — LV_CHROME_DIRTY marks them stale. This keeps the per-tick frame fork-free.
-    local LV_FLASHON=0 LV_CHROME_DIRTY=1 LV_BANNER_INNER="" LV_BANNER_SP="" LV_BANNER_COL="" LV_BANNER_TAG="" LV_STATUS="" LV_MAST_L="" LV_MAST_GAP=""
+    local LV_FLASHON=0 LV_CHROME_DIRTY=1 LV_BANNER_INNER="" LV_BANNER_SP="" LV_BANNER_COL="" LV_BANNER_TAG="" LV_STATUS="" LV_MAST_L="" LV_MAST_GAP="" LV_COLHEAD=""
 
     # ── geometry: fill the terminal, cap the column, cache the pad + rule ──────
     # Recomputed only on resize (SIGWINCH sets LV_RESIZE), never per tick — so the
@@ -135,6 +136,8 @@ live_broadcast() {
         # toggling it changes column layout (re-render + clear), never the feed height.
         local chrome=5
         [ "$LV_MARQUEE" = 1 ] && chrome=$(( chrome + 1 ))
+        # the column-header legend costs one row, shown only when a desk/churn column is on
+        if [ "$LV_TOKENS" = 1 ] || [ "$LV_CHURN_ON" = 1 ]; then chrome=$(( chrome + 1 )); fi
         BODY=$(( LINES - chrome )); [ "$BODY" -lt 1 ] && BODY=1
         printf -v PADS '%*s' "$PAD" ''
         printf -v HRULE '%*s' "$CW" ''; HRULE="${HRULE// /─}"
@@ -150,6 +153,10 @@ live_broadcast() {
         fi
         local mgap=$(( CW - mlw - 10 )); [ "$mgap" -lt 1 ] && mgap=1
         printf -v LV_MAST_GAP '%*s' "$mgap" ''
+        # Column-header legend: CW- and toggle-dependent (not feed-dependent), so rebuild
+        # it here on resize/toggle, cached in LV_COLHEAD. Empty when no desk/churn column
+        # is on, so _live_frame paints no header row (and chrome above reserved none).
+        if [ "$LV_TOKENS" = 1 ] || [ "$LV_CHURN_ON" = 1 ]; then _live_colhead_v LV_COLHEAD; else LV_COLHEAD=""; fi
     }
 
     # ── repo discovery (once at start; +cwd, deduped — same set collect scans) ──
@@ -430,6 +437,35 @@ live_broadcast() {
             "${GN_R}${GN_FAINT}" "$(hr "$right")" "$GN_R"
     }
 
+    # ── the column-header legend: labels each ACTIVE column, color-matched ──────
+    # A table header for the feed, shown only while a desk/churn column is on (the base
+    # time/repo/headline columns are self-evident). Mirrors _live_render_feed's field
+    # widths EXACTLY so each label sits over its column: a GN_YEL 6-col "TOKENS" + a
+    # GN_GRN 7-col "+GROWTH" when the A.I. desk is on, a GN_CYN 5-col "CHURN" when churn
+    # is on — the same yellow/green/cyan as the values, so the colors double as the key.
+    # The HEADLINE label is truncated to the same body width as a feed row, so the header
+    # line is <= CW exactly like the rows it heads. Built on resize/toggle (CW- and
+    # toggle-dependent, not feed-dependent), cached in LV_COLHEAD by _live_geometry.
+    _live_colhead_v() {  # _live_colhead_v <outvar>
+        local __ov="$1" desk="" hl bmax deskw=0
+        if [ "$LV_TOKENS" = 1 ]; then
+            desk+=" ${GN_B}${GN_YEL}$(printf '%6s' 'TOKENS')${GN_R} ${GN_B}${GN_GRN}$(printf '%-7s' '+GROWTH')${GN_R}"
+            deskw=$(( deskw + 15 ))
+        fi
+        if [ "$LV_CHURN_ON" = 1 ]; then
+            desk+=" ${GN_B}${GN_CYN}$(gn_pad 'CHURN' 5)${GN_R}"
+            deskw=$(( deskw + 6 ))
+        fi
+        bmax=$(( CW - 23 - deskw )); [ "$bmax" -lt 1 ] && bmax=1
+        hl="$(gn_truncate 'HEADLINE' "$bmax")"
+        printf -v "$__ov" '%s%-5s%s %s%s%s %s%s%s%s %s%s%s' \
+            "$GN_B" 'TIME' "$GN_R" \
+            "$GN_B" ' ' "$GN_R" \
+            "$GN_B" "$(gn_pad 'REPO' 14)" "$GN_R" \
+            "$desk" \
+            "$GN_B" "$hl" "$GN_R"
+    }
+
     # ── render the feed list into LV_BUF (cached; rebuilt on poll/resize only) ──
     # Absolute commit time (HH:MM), so a cached line never goes stale between
     # polls — the per-tick repaint reuses LV_BUF untouched (no fork on the
@@ -605,6 +641,9 @@ EOF
         # banner
         _live_banner_v bann
         out+="${PADS}${bann}"$'\033[K\n'
+        # column-header legend — only when a desk/churn column is active (else empty, no
+        # row). Cached by _live_geometry; chrome already reserved the row, so BODY fits.
+        [ -n "$LV_COLHEAD" ] && out+="${PADS}${LV_COLHEAD}"$'\033[K\n'
         # feed body — cached LV_BUF, padded; blank-fill the rest of BODY
         for ((i=0;i<BODY;i++)); do
             if [ "$i" -lt "${#LV_BUF[@]}" ]; then out+="${PADS}${LV_BUF[$i]}"$'\033[K\n'

@@ -91,7 +91,8 @@ The churn column (toggle c, or GIT_TIMES_LIVE_CHURN) is separate and independent
 the A.I. desk: a cyan "Δchurn" showing that commit's own lines touched (additions +
 deletions), exact and per-commit, measured straight from git — no jq. Each column
 toggles on its own, so you can run churn alone, the token desk alone, both, or
-neither.
+neither. Whenever either column is on, a color-matched header row labels the active
+columns (TOKENS yellow, +GROWTH green, CHURN cyan).
 
 Forge config (PR/issue events) goes in .env — see .env.example for placeholders.
 EOF

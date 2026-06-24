@@ -100,7 +100,10 @@ first reaches the wire. Blank on PR/issue rows and on empty or binary-only commi
 
 The desk and churn columns are fully independent — run churn alone (pure git, no
 jq), the token desk alone, both, or neither. Each toggle only widens or narrows the
-headline column; the feed never shifts rows.
+headline column; the feed never shifts rows. Whenever either column is showing, a
+color-matched header row labels the active columns (yellow `TOKENS`, green
+`+GROWTH`, cyan `CHURN`) so the figures decode at a glance; with both off there is no
+header row.
 
 ### Forge events (PR / issue)
 
