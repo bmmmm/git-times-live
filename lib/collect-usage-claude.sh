@@ -107,6 +107,13 @@ if [ -f "$INDEX" ]; then
     _o="$(cat "$INDEX" 2>/dev/null)"
     if printf '%s' "$_o" | jq -e '.files' >/dev/null 2>&1; then OLD="$_o"; fi
 fi
+# Hand the previous index to the incremental jq steps via a FILE (--slurpfile),
+# NEVER --argjson on the command line: a grown index (a few thousand transcripts is
+# ~1MB+) blows past ARG_MAX, jq dies with "argument list too long", the stale/rebuild
+# steps silently no-op, and the index freezes at its last size forever — so new days
+# never appear. --slurpfile reads the bytes from disk and dodges argv entirely. The
+# object then arrives wrapped in a one-element array, hence $old[0] below.
+printf '%s' "$OLD" > "$WORK/old.json"
 
 # ── manifest of current transcripts (NDJSON {path,mtime,size}) ───────────────
 list_files | jq -Rc 'split(" ") | select(length>=3)
@@ -115,8 +122,8 @@ list_files | jq -Rc 'split(" ") | select(length>=3)
 [ -s "$WORK/manifest.ndjson" ] || { printf '{"buckets":[]}'; exit 0; }
 
 # ── stale = new or mtime/size-changed since the last index ────────────────────
-jq -c --argjson old "$OLD" --slurpfile m "$WORK/manifest.ndjson" -n '
-    ($old.files // {}) as $of
+jq -c --slurpfile old "$WORK/old.json" --slurpfile m "$WORK/manifest.ndjson" -n '
+    ($old[0].files // {}) as $of
     | $m[]
     | . as $cur
     | ($of[$cur.path] // null) as $e
@@ -133,11 +140,11 @@ if [ -s "$WORK/stale.ndjson" ]; then
 fi
 
 # ── rebuild the index: reuse unchanged entries, splice in the re-parsed ones ──
-jq -nc --argjson old "$OLD" \
+jq -nc --slurpfile old "$WORK/old.json" \
     --slurpfile m "$WORK/manifest.ndjson" \
     --slurpfile s "$WORK/stale.ndjson" \
     --slurpfile b "$WORK/parsed_buckets.ndjson" '
-    ($old.files // {}) as $of
+    ($old[0].files // {}) as $of
     | ([$m[].path] | map({key:., value:true}) | from_entries) as $present
     | ([$s[].path] | map({key:., value:true}) | from_entries) as $stale
     | ([$b[] | {key:.file, value:.buckets}] | from_entries) as $bm
