@@ -82,6 +82,13 @@ since you enabled the desk — the live delta against a baseline frozen at the f
 collect after `t` (or launch). So you watch each project consume tokens in real
 time. It is blank when the repo has not grown since you started watching.
 
+Right of the growth tag, a cyan **`Δchurn`** shows that commit's own churn — the
+lines it touched (additions + deletions), compact (`Δ262`, `Δ48k`, `Δ1M`). Unlike
+the per-repo token and growth columns (identical on every line of a repo), churn is
+**per commit** and exact: it is the one figure here measured straight from git
+(`git show --numstat`, no jq), captured once when the commit first reaches the wire.
+Blank on PR/issue rows and on empty or binary-only commits.
+
 Toggle it live with `t`, or start it on with `GIT_TIMES_LIVE_TOKENS=on`. The
 usage collect runs asynchronously on its own cadence so the clock never stalls.
 Fail-soft: no jq or no transcripts → the columns just stay blank.

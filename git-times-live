@@ -15,8 +15,9 @@
 # Repo discovery: GIT_TIMES_ROOTS (space-separated roots to scan) plus the repo
 # you launch it from. Forge events need .env config (see .env.example).
 #
-# The A.I. desk (inline per-repo assistant tokens + a green "+growth" tag, off by
-# default) is optional and reads your Claude Code transcripts — needs jq. Toggle with
+# The A.I. desk (inline per-repo assistant tokens + a green "+growth" tag + a cyan
+# per-commit "Δchurn", off by default) is optional. Tokens/growth read your Claude
+# Code transcripts — needs jq; churn is exact, straight from git (no jq). Toggle with
 # t or GIT_TIMES_LIVE_TOKENS.
 
 set -uo pipefail
@@ -79,10 +80,12 @@ Tunables (seconds unless noted):
 
 The A.I. desk adds an inline token column to each feed line (that repo total over
 the window) plus a green "+growth" tag — how much the repo has gained since you
-enabled the desk, so you watch each project consume tokens live. Read from your
-Claude Code transcripts (default ~/.claude/projects, override with
+enabled the desk, so you watch each project consume tokens live — and a cyan
+"Δchurn": that commit's own lines touched (additions + deletions), exact and
+per-commit, measured straight from git (no jq). The token/growth pair reads from
+your Claude Code transcripts (default ~/.claude/projects, override with
 GIT_TIMES_USAGE_CLAUDE_DIR) and needs jq. Off by default; when off, no jq ever runs.
-Fail-soft: no jq or no transcripts → the columns just stay blank.
+Fail-soft: no jq or no transcripts → the token columns just stay blank.
 
 Forge config (PR/issue events) goes in .env — see .env.example for placeholders.
 EOF

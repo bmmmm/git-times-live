@@ -29,8 +29,10 @@
 # it). When on (env or the `t` key), each feed line gains an inline token column
 # right of the repo name — that repo total assistant tokens over the window — plus
 # a green "+growth" tag: how much the repo has gained since the desk was enabled, so
-# you watch each project consume tokens live. Both read from the same Claude Code
-# transcripts as the reader A.I. desk. It is the ONE jq
+# you watch each project consume tokens live. Right of those, a cyan "Δchurn" shows
+# that commit's own lines touched (adds+dels) — the one PER-COMMIT figure on the
+# row, exact and pure git (no jq), captured at poll. The token/growth pair reads
+# from the same Claude Code transcripts as the reader A.I. desk and is the ONE jq
 # consumer here, and only while enabled: the usage collect runs ASYNC on its own
 # cadence (like the forge poll), so the clock never stalls, and when the module is
 # off NO jq ever runs — the channel stays pure git. Fail-soft: no jq or no
@@ -73,7 +75,11 @@ live_broadcast() {
 
     # ── runtime state ─────────────────────────────────────────────────────────
     local -a LV_REPOS=() LV_FEED=() LV_BUF=()
-    local -A LV_SEEN=()
+    # LV_SEEN dedups commit/event keys on the wire; LV_CHURN caches each commit's
+    # churn ("Δ<lines>", adds+dels) captured once when the sha is first polled and
+    # shown cyan in the A.I.-desk row, right of the growth tag — per-commit, unlike
+    # the per-repo token/growth columns.
+    local -A LV_SEEN=() LV_CHURN=()
     local LV_NEW=0 LV_TICKLOOP="" LV_TICKOFF=0 LV_RESIZE=1
     local LINES=24 COLS=80 CW=76 PAD=0 BODY=18 PADS="" HRULE=""
     local _stty_saved="" last_local=0 last_remote=0 flash_until=0 now=0 key="" paused=0
@@ -180,11 +186,39 @@ live_broadcast() {
         for k in "${added[@]}"; do [ -n "${vis[$k]:-}" ] && LV_NEW=$(( LV_NEW + 1 )); done
     }
 
+    # ── per-commit churn: lines touched (adds+dels) for ONE freshly-polled sha ──
+    # Captured here, once, the moment a commit is first seen — NOT via --numstat in
+    # the poll `git log` (that stays numstat-free so the sweep returns instantly).
+    # Only genuinely new commits pay a `git show`, so steady-state polling is
+    # unaffected and a startup backfill is bounded by the lookback window. Summed and
+    # humanized into LV_CHURN[key] as "Δ<n>" (cyan in the desk row). Binary files
+    # report "-" in numstat → awk reads them as 0 (no line count exists). A zero /
+    # empty total leaves no entry, so an empty or binary-only commit shows a blank
+    # churn column. git show (not diff-tree) so a root commit counts its whole tree.
+    # Formatted COMPACT and decimal-less (Δ262, Δ48k, Δ1M) — NOT via _live_fmt_tok,
+    # whose decimals ("999.9k") would overflow the 5-col cell. A per-commit churn only
+    # needs its order of magnitude at a glance; this keeps Δ<n> at ≤5 columns for any
+    # plausible value (a vendor/generated commit can still reach the M range).
+    _live_churn_capture() {  # _live_churn_capture <repo> <sha> <key>
+        local total cf
+        total="$(git -C "$1" show --numstat --format='' "$2" 2>/dev/null \
+                    | awk '{ a += $1; d += $2 } END { print a + d + 0 }')"
+        case "$total" in ''|*[!0-9]*) total=0 ;; esac
+        [ "$total" -gt 0 ] || return 0
+        if   [ "$total" -lt 1000 ];       then cf="$total"
+        elif [ "$total" -lt 1000000 ];    then cf="$(( total / 1000 ))k"
+        elif [ "$total" -lt 1000000000 ]; then cf="$(( total / 1000000 ))M"
+        else                                   cf="$(( total / 1000000000 ))B"; fi
+        LV_CHURN["$3"]="Δ$cf"
+    }
+
     # ── the cheap poll: new commits since <since-epoch> across all repos ───────
     # One `git log --since` per repo with NO --numstat — returns instantly when a
     # repo has nothing new. sha-deduped (the --since boundary can re-list a commit
     # on the second), so re-polling is idempotent. Appends fresh records; _live_feed_sort
-    # then settles LV_NEW = how many are visible after the cap.
+    # then settles LV_NEW = how many are visible after the cap. Each genuinely new sha
+    # also gets its churn captured once (_live_churn_capture) — the lone place that
+    # diff-stats a commit, deliberately off the per-tick render path.
     _live_poll_local() {  # _live_poll_local <since-epoch>
         local since="$1" repo name author sha ct subj key ctype
         local -a added=()
@@ -198,6 +232,7 @@ live_broadcast() {
                 key="c:$sha"
                 [ -n "${LV_SEEN[$key]:-}" ] && continue
                 LV_SEEN[$key]=1
+                _live_churn_capture "$repo" "$sha" "$key"
                 _live_type_v ctype "$subj"
                 LV_FEED+=("${ct}${GN_US}commit${GN_US}${name}${GN_US}${ctype}${GN_US}${subj}${GN_US}${key}")
                 added+=("$key")
@@ -387,7 +422,7 @@ live_broadcast() {
     # heartbeat). The wall clock lives in the masthead instead.
     _live_render_feed() {
         LV_BUF=()
-        local rec ts kind repo type text tm tcol glyph rp body bmax n=0 dt dkey prevday=""
+        local rec ts kind repo type text tm tcol glyph rp cp body bmax n=0 dt dkey prevday=""
         for rec in "${LV_FEED[@]}"; do
             [ "$n" -ge "$BODY" ] && break
             IFS="$GN_US" read -r ts kind repo type text key <<EOF
@@ -413,18 +448,25 @@ EOF
             if [ "$LV_TOKENS" = 1 ]; then
                 # A.I. desk inline: this repo window token total (GN_YEL spend tag, 6-col
                 # right) plus a GN_GRN "+growth" since the desk was enabled (LV_TOK_DELTA,
-                # 7-col left, blank when flat). Both are per-repo window figures, so every
-                # line of a repo carries the same pair. Blank when the repo has no assistant
-                # usage or the first collect is not in yet. Costs the body 15 cols over the
-                # no-token layout (6 total +1 +7 delta +1), so the columns never overlap the
-                # subject.
-                bmax=$(( CW - 38 )); [ "$bmax" -lt 1 ] && bmax=1   # +15 over the 23-col no-token floor
+                # 7-col left, blank when flat) — both per-repo window figures, so every line
+                # of a repo carries the same pair — and a GN_CYN "Δchurn" (LV_CHURN, 5-col
+                # left), this commit's own lines touched: per-commit, the one exact figure
+                # here. Token/growth blank when the repo has no usage or the first collect is
+                # not in; churn blank on pr/issue rows and empty commits. Costs the body 21
+                # cols over the no-token layout (6 total +1 +7 delta +1 +5 churn +1), so the
+                # columns never overlap the subject.
+                bmax=$(( CW - 44 )); [ "$bmax" -lt 1 ] && bmax=1   # +21 over the 23-col no-token floor
                 body="$(gn_truncate "$text" "$bmax")"
-                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%-7s%s %s%s%s' \
+                # gn_pad (display-width aware) for the churn cell, NOT printf %-5s: the
+                # leading Δ is multibyte (2 bytes, 1 column), so %-5s would pad by byte
+                # length and shift the body left. Matches how rp is padded above.
+                cp="$(gn_pad "${LV_CHURN[$key]:-}" 5)"
+                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%-7s%s %s%s%s %s%s%s' \
                     "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
                     "$GN_B" "$rp" "$GN_R" \
                     "$GN_YEL" "${LV_TOK_MAP[$repo]:-}" "$GN_R" \
                     "$GN_GRN" "${LV_TOK_DELTA[$repo]:-}" "$GN_R" \
+                    "$GN_CYN" "$cp" "$GN_R" \
                     "$GN_DIM" "$body" "$GN_R")")
             else
                 bmax=$(( CW - 23 )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1; floor 1 so a narrow CW shrinks the body, never wraps the row
