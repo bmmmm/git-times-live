@@ -10,10 +10,13 @@
 # breaking-news feed under a live clock with a lower-third marquee ticker.
 # It polls git directly — no collect, no cache write — and runs until you quit.
 #
-# Keys:  q quit · r refresh now · p pause · m toggle the lower-third ticker
+# Keys:  q quit · r refresh now · p pause · m toggle ticker · t toggle A.I. desk
 #
 # Repo discovery: GIT_TIMES_ROOTS (space-separated roots to scan) plus the repo
 # you launch it from. Forge events need .env config (see .env.example).
+#
+# The A.I. desk panel (per-repo assistant tokens, off by default) is optional and
+# reads your Claude Code transcripts — needs jq. Toggle with t or GIT_TIMES_LIVE_TOKENS.
 
 set -uo pipefail
 
@@ -57,7 +60,7 @@ Options:
   -h, --help                  this help
       --version               print the generator commit and exit
 
-Keys (while running):  q quit · r refresh now · p pause · m toggle ticker
+Keys (while running):  q quit · r refresh now · p pause · m toggle ticker · t A.I. desk
 
 Repo discovery:
   GIT_TIMES_ROOTS   space-separated roots to scan for repos (plus the cwd repo)
@@ -70,6 +73,12 @@ Tunables (seconds unless noted):
   GIT_TIMES_LIVE_FEED_MAX          max items kept on the wire (default 60)
   GIT_TIMES_LIVE_REMOTE_INTERVAL   remote PR/issue poll cadence (default 90)
   GIT_TIMES_LIVE_TICKER            start with the ticker running (on|off, default off)
+  GIT_TIMES_LIVE_TOKENS            A.I. desk panel: per-repo assistant tokens (on|off, default off)
+  GIT_TIMES_LIVE_TOKENS_INTERVAL   A.I. desk poll cadence (default 60)
+
+The A.I. desk panel reads your Claude Code transcripts (default ~/.claude/projects,
+override with GIT_TIMES_USAGE_CLAUDE_DIR) and needs jq. Off by default; when off, no
+jq ever runs. Fail-soft: no jq or no transcripts → the panel just reads as quiet.
 
 Forge config (PR/issue events) goes in .env — see .env.example for placeholders.
 EOF

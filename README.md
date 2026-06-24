@@ -43,6 +43,7 @@ ln -s "$PWD/git-times-live" ~/.local/bin/git-times-live
 | `r` | refresh now                    |
 | `p` | pause / resume                 |
 | `m` | toggle the lower-third ticker  |
+| `t` | toggle the A.I. desk panel     |
 
 ## Configuration
 
@@ -60,9 +61,23 @@ Repo discovery and behaviour are env-driven:
 | `GIT_TIMES_LIVE_FEED_MAX`         | max items kept on the wire                         | `60`     |
 | `GIT_TIMES_LIVE_REMOTE_INTERVAL`  | remote (PR/issue) poll cadence (s)                 | `90`     |
 | `GIT_TIMES_LIVE_TICKER`           | start with the ticker running (`on`/`off`)         | `off`    |
+| `GIT_TIMES_LIVE_TOKENS`           | A.I. desk panel: per-repo assistant tokens (`on`/`off`) | `off` |
+| `GIT_TIMES_LIVE_TOKENS_INTERVAL`  | A.I. desk poll cadence (s)                         | `60`     |
 
 The `--scope`, `--theme`, `--highlight`, `--width`, `--no-color`, `--authors`,
 and `--mine` flags override the matching env at launch.
+
+### A.I. desk panel (assistant tokens)
+
+An **optional, off-by-default** module: a per-repo strip below the feed showing
+how many assistant tokens each repo used, read from your **Claude Code
+transcripts** (default `~/.claude/projects`, override with
+`GIT_TIMES_USAGE_CLAUDE_DIR`). It is the only part of the channel that uses
+**jq** — and only while the module is on; off, the channel stays pure git.
+
+Toggle it live with `t`, or start it on with `GIT_TIMES_LIVE_TOKENS=on`. The
+usage collect runs asynchronously on its own cadence so the clock never stalls.
+Fail-soft: no jq or no transcripts → the panel just reads as quiet.
 
 ### Forge events (PR / issue)
 

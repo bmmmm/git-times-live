@@ -1,5 +1,5 @@
 git-times-live — GENERATED standalone
-source-commit: 3dd97aa38a9a3667b586c959107f13808dd16bb0
+source-commit: e13ecd057aee1a9e85496eaa857026dd93420120
 generator: scripts/build-live-dist.sh (git-times)
 marker: do-not-hand-edit-regenerate
 
@@ -17,6 +17,7 @@ copied files:
   lib/collect-forgejo.sh
   lib/collect-github.sh
   lib/collect-gitlab.sh
+  lib/collect-usage-claude.sh
   git-times-live
   README.md
   .env.example
