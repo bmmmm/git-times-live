@@ -131,9 +131,11 @@ live_broadcast() {
         # fixed-height frame. Clamp to the real width — a cramped channel beats a broken one.
         [ "$CW" -gt "$COLS" ] && CW="$COLS"
         PAD="$(gn_center_pad "$COLS" "$CW")"
-        # chrome rows: masthead+rule+banner+rule+status = 5, +1 for the marquee when on.
-        # The A.I. desk costs NO chrome row — its tokens ride inline in each feed line, so
-        # toggling it changes column layout (re-render + clear), never the feed height.
+        # chrome rows: masthead+rule+banner+rule+status = 5, +1 for the marquee when on,
+        # +1 for the column-header legend when a desk/churn column is on (next stanza). The
+        # desk's token values and the churn cell ride INLINE in each feed line (no row of
+        # their own); only their shared legend header costs a chrome row — so toggling either
+        # column shifts the feed height by exactly that one header row, never by the columns.
         local chrome=5
         [ "$LV_MARQUEE" = 1 ] && chrome=$(( chrome + 1 ))
         # the column-header legend costs one row, shown only when a desk/churn column is on
