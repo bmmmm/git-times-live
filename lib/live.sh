@@ -24,19 +24,24 @@
 #   GIT_TIMES_LIVE_TICKER     start with the lower-third marquee running (default off)
 #   GIT_TIMES_LIVE_TOKENS     show the A.I. desk — inline per-repo assistant tokens (default off)
 #   GIT_TIMES_LIVE_TOKENS_INTERVAL  assistant-usage poll cadence, seconds (default 60)
+#   GIT_TIMES_LIVE_CHURN      show the per-commit churn column — inline Δ lines touched (default off)
 #
 # The A.I. desk is an OPTIONAL module (off by default — not every channel wants
 # it). When on (env or the `t` key), each feed line gains an inline token column
 # right of the repo name — that repo total assistant tokens over the window — plus
 # a green "+growth" tag: how much the repo has gained since the desk was enabled, so
-# you watch each project consume tokens live. Right of those, a cyan "Δchurn" shows
-# that commit's own lines touched (adds+dels) — the one PER-COMMIT figure on the
-# row, exact and pure git (no jq), captured at poll. The token/growth pair reads
-# from the same Claude Code transcripts as the reader A.I. desk and is the ONE jq
-# consumer here, and only while enabled: the usage collect runs ASYNC on its own
-# cadence (like the forge poll), so the clock never stalls, and when the module is
-# off NO jq ever runs — the channel stays pure git. Fail-soft: no jq or no
-# transcripts → the columns simply stay blank, never an error.
+# you watch each project consume tokens live. The token/growth pair reads from the
+# same Claude Code transcripts as the reader A.I. desk and is the ONE jq consumer
+# here, and only while enabled: the usage collect runs ASYNC on its own cadence
+# (like the forge poll), so the clock never stalls, and when the module is off NO jq
+# ever runs — the channel stays pure git. Fail-soft: no jq or no transcripts → the
+# columns simply stay blank, never an error.
+#
+# The churn column is a SEPARATE optional module (off by default, the `c` key or
+# GIT_TIMES_LIVE_CHURN), independent of the A.I. desk: a cyan "Δchurn" showing that
+# commit's own lines touched (adds+dels) — the one PER-COMMIT figure on the row,
+# exact and pure git (no jq), captured once at poll. Each desk/churn block is toggled
+# on its own; the feed body width tracks whichever blocks are showing.
 # Reads the parse_opts globals in scope: TF, SCOPE, AUTHORS, NOW, WIDTH, the GN_*
 # palette (gn_color_init, called by the dispatch) and everything gittimes-lib.sh
 # provides — bash dynamic scoping, the house pattern, like reader.sh.
@@ -67,6 +72,13 @@ live_broadcast() {
     case "${GIT_TIMES_LIVE_TOKENS:-}" in 1|on|true|yes) LV_TOKENS=1 ;; esac
     local LV_TOKENS_INTERVAL
     LV_TOKENS_INTERVAL="${GIT_TIMES_LIVE_TOKENS_INTERVAL:-60}"; case "$LV_TOKENS_INTERVAL" in ''|*[!0-9]*) LV_TOKENS_INTERVAL=60 ;; esac
+    # The churn column (inline per-commit Δ lines touched) is its OWN opt-in module,
+    # independent of the A.I. desk — pure git, no jq. c toggles it live;
+    # GIT_TIMES_LIVE_CHURN=on starts it on. Churn is captured at poll regardless of
+    # this flag (always cheap, bounded by the lookback), so the flag gates only the
+    # render — flipping it on shows every visible commit's churn immediately.
+    local LV_CHURN_ON=0
+    case "${GIT_TIMES_LIVE_CHURN:-}" in 1|on|true|yes) LV_CHURN_ON=1 ;; esac
 
     # ── palette state (gn_color_init ran in the dispatch) ─────────────────────
     local COLOR=0; [ -n "$GN_R" ] && COLOR=1
@@ -77,8 +89,8 @@ live_broadcast() {
     local -a LV_REPOS=() LV_FEED=() LV_BUF=()
     # LV_SEEN dedups commit/event keys on the wire; LV_CHURN caches each commit's
     # churn ("Δ<lines>", adds+dels) captured once when the sha is first polled and
-    # shown cyan in the A.I.-desk row, right of the growth tag — per-commit, unlike
-    # the per-repo token/growth columns.
+    # shown cyan in its own independently-toggled column (the `c` key) — per-commit,
+    # unlike the per-repo token/growth columns of the A.I. desk.
     local -A LV_SEEN=() LV_CHURN=()
     local LV_NEW=0 LV_TICKLOOP="" LV_TICKOFF=0 LV_RESIZE=1
     local LINES=24 COLS=80 CW=76 PAD=0 BODY=18 PADS="" HRULE=""
@@ -190,8 +202,10 @@ live_broadcast() {
     # Captured here, once, the moment a commit is first seen — NOT via --numstat in
     # the poll `git log` (that stays numstat-free so the sweep returns instantly).
     # Only genuinely new commits pay a `git show`, so steady-state polling is
-    # unaffected and a startup backfill is bounded by the lookback window. Summed and
-    # humanized into LV_CHURN[key] as "Δ<n>" (cyan in the desk row). Binary files
+    # unaffected and a startup backfill is bounded by the lookback window. Capture is
+    # unconditional (independent of the `c` render toggle), so flipping churn on shows
+    # every visible commit at once. Summed and humanized into LV_CHURN[key] as "Δ<n>"
+    # (cyan in its own toggled column). Binary files
     # report "-" in numstat → awk reads them as 0 (no line count exists). A zero /
     # empty total leaves no entry, so an empty or binary-only commit shows a blank
     # churn column. git show (not diff-tree) so a root commit counts its whole tree.
@@ -422,7 +436,7 @@ live_broadcast() {
     # heartbeat). The wall clock lives in the masthead instead.
     _live_render_feed() {
         LV_BUF=()
-        local rec ts kind repo type text tm tcol glyph rp cp body bmax n=0 dt dkey prevday=""
+        local rec ts kind repo type text key tm tcol glyph rp body bmax n=0 dt dkey prevday="" desk deskw
         for rec in "${LV_FEED[@]}"; do
             [ "$n" -ge "$BODY" ] && break
             IFS="$GN_US" read -r ts kind repo type text key <<EOF
@@ -445,36 +459,32 @@ EOF
                 *)      tcol="$GN_DIM"; glyph='▌' ;;
             esac
             rp="$(gn_pad "$repo" 14)"
+            # Optional desk columns, each toggled on its OWN, assembled into one
+            # pre-colored segment of known display width that sits between the repo and
+            # the body (chrome = 23 base + this segment; the body width tracks it):
+            #   A.I. desk (LV_TOKENS): a GN_YEL 6-col token total + a GN_GRN 7-col
+            #     "+growth" — both per-repo window figures, identical on every row of a
+            #     repo, the lone jq-fed pair; blank until the first collect lands. +15.
+            #   churn (LV_CHURN_ON): a GN_CYN 5-col "Δchurn", this commit's own lines
+            #     touched — per-commit and exact, pure git; blank on pr/issue + empty or
+            #     binary commits. +6. gn_pad (not %-5s) because the leading Δ is multibyte
+            #     (2 bytes, 1 column) and %-5s would pad by byte length, shifting the body.
+            desk=""; deskw=0
             if [ "$LV_TOKENS" = 1 ]; then
-                # A.I. desk inline: this repo window token total (GN_YEL spend tag, 6-col
-                # right) plus a GN_GRN "+growth" since the desk was enabled (LV_TOK_DELTA,
-                # 7-col left, blank when flat) — both per-repo window figures, so every line
-                # of a repo carries the same pair — and a GN_CYN "Δchurn" (LV_CHURN, 5-col
-                # left), this commit's own lines touched: per-commit, the one exact figure
-                # here. Token/growth blank when the repo has no usage or the first collect is
-                # not in; churn blank on pr/issue rows and empty commits. Costs the body 21
-                # cols over the no-token layout (6 total +1 +7 delta +1 +5 churn +1), so the
-                # columns never overlap the subject.
-                bmax=$(( CW - 44 )); [ "$bmax" -lt 1 ] && bmax=1   # +21 over the 23-col no-token floor
-                body="$(gn_truncate "$text" "$bmax")"
-                # gn_pad (display-width aware) for the churn cell, NOT printf %-5s: the
-                # leading Δ is multibyte (2 bytes, 1 column), so %-5s would pad by byte
-                # length and shift the body left. Matches how rp is padded above.
-                cp="$(gn_pad "${LV_CHURN[$key]:-}" 5)"
-                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%6s%s %s%-7s%s %s%s%s %s%s%s' \
-                    "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
-                    "$GN_B" "$rp" "$GN_R" \
-                    "$GN_YEL" "${LV_TOK_MAP[$repo]:-}" "$GN_R" \
-                    "$GN_GRN" "${LV_TOK_DELTA[$repo]:-}" "$GN_R" \
-                    "$GN_CYN" "$cp" "$GN_R" \
-                    "$GN_DIM" "$body" "$GN_R")")
-            else
-                bmax=$(( CW - 23 )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1; floor 1 so a narrow CW shrinks the body, never wraps the row
-                body="$(gn_truncate "$text" "$bmax")"
-                LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s %s%s%s' \
-                    "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
-                    "$GN_B" "$rp" "$GN_R" "$GN_DIM" "$body" "$GN_R")")
+                desk+=" ${GN_YEL}$(printf '%6s' "${LV_TOK_MAP[$repo]:-}")${GN_R} ${GN_GRN}$(printf '%-7s' "${LV_TOK_DELTA[$repo]:-}")${GN_R}"
+                deskw=$(( deskw + 15 ))
             fi
+            if [ "$LV_CHURN_ON" = 1 ]; then
+                desk+=" ${GN_CYN}$(gn_pad "${LV_CHURN[$key]:-}" 5)${GN_R}"
+                deskw=$(( deskw + 6 ))
+            fi
+            bmax=$(( CW - 23 - deskw )); [ "$bmax" -lt 1 ] && bmax=1   # 5 time +1 +1 glyph +1 +14 repo +1, + desk segment
+            body="$(gn_truncate "$text" "$bmax")"
+            LV_BUF+=("$(printf '%s%-5s%s %s%s%s %s%s%s%s %s%s%s' \
+                "$GN_DIM" "$tm" "$GN_R" "$tcol" "$glyph" "$GN_R" \
+                "$GN_B" "$rp" "$GN_R" \
+                "$desk" \
+                "$GN_DIM" "$body" "$GN_R")")
             n=$(( n + 1 ))
         done
         LV_CHROME_DIRTY=1   # feed changed: the banner body + status wire-count need a rebuild
@@ -524,7 +534,7 @@ EOF
         # compact and the left finally truncate.
         local state="LIVE"; [ "$paused" = 1 ] && state="PAUSED"
         local nrepo="${#LV_REPOS[@]}" wire="${#LV_FEED[@]}"
-        local rstat="q quit · r refresh · p pause · m ticker · t a.i. " lstat lw rw sgap cand sg
+        local rstat="q quit · r refresh · p pause · m ticker · t a.i. · c churn " lstat lw rw sgap cand sg
         local -a lcand=(
             " ◉ ${state} · ${nrepo} repos · poll ${LV_INTERVAL}s · ${wire} on the wire"
             " ◉ ${state} · ${nrepo} repos · ${wire} on the wire"
@@ -537,7 +547,7 @@ EOF
             [ "$(( lw + rw + 1 ))" -le "$CW" ] && break
         done
         if [ "$(( lw + rw + 1 ))" -gt "$CW" ]; then   # narrowest tier still too wide
-            rstat="q·r·p·m·t "; gn_strwidth_v rw "$rstat"
+            rstat="q·r·p·m·t·c "; gn_strwidth_v rw "$rstat"
             if [ "$(( lw + rw + 1 ))" -gt "$CW" ]; then
                 gn_truncate_v lstat "$lstat" "$(( CW - rw - 1 ))"; gn_strwidth_v lw "$lstat"
             fi
@@ -735,6 +745,12 @@ EOF
                      [ -z "$LV_TOK_PID" ] && { _live_tokens_start "$(( now - LV_LOOKBACK ))" "$now"; last_tokens="$now"; }
                  fi
                  LV_RESIZE=1 ;;   # resize path recomputes geometry + full clear next pass
+            c|C) # toggle the churn column — pure git, independent of the A.I. desk. The
+                 # inline Δchurn cell appears/disappears, so the body width changes:
+                 # re-lay-out (re-render + full clear), no row shift. Churn is captured at
+                 # poll regardless, so toggling on shows every visible commit at once.
+                 if [ "$LV_CHURN_ON" = 1 ]; then LV_CHURN_ON=0; else LV_CHURN_ON=1; fi
+                 LV_RESIZE=1 ;;
             *) : ;;
         esac
     done

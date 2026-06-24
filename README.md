@@ -44,6 +44,7 @@ ln -s "$PWD/git-times-live" ~/.local/bin/git-times-live
 | `p` | pause / resume                 |
 | `m` | toggle the lower-third ticker  |
 | `t` | toggle the A.I. desk (inline tokens) |
+| `c` | toggle the churn column (per-commit Δ) |
 
 ## Configuration
 
@@ -63,6 +64,7 @@ Repo discovery and behaviour are env-driven:
 | `GIT_TIMES_LIVE_TICKER`           | start with the ticker running (`on`/`off`)         | `off`    |
 | `GIT_TIMES_LIVE_TOKENS`           | A.I. desk: inline per-repo assistant tokens (`on`/`off`) | `off` |
 | `GIT_TIMES_LIVE_TOKENS_INTERVAL`  | A.I. desk poll cadence (s)                         | `60`     |
+| `GIT_TIMES_LIVE_CHURN`            | churn column: inline per-commit Δ lines touched (`on`/`off`) | `off` |
 
 The `--scope`, `--theme`, `--highlight`, `--width`, `--no-color`, `--authors`,
 and `--mine` flags override the matching env at launch.
@@ -82,16 +84,23 @@ since you enabled the desk — the live delta against a baseline frozen at the f
 collect after `t` (or launch). So you watch each project consume tokens in real
 time. It is blank when the repo has not grown since you started watching.
 
-Right of the growth tag, a cyan **`Δchurn`** shows that commit's own churn — the
-lines it touched (additions + deletions), compact (`Δ262`, `Δ48k`, `Δ1M`). Unlike
-the per-repo token and growth columns (identical on every line of a repo), churn is
-**per commit** and exact: it is the one figure here measured straight from git
-(`git show --numstat`, no jq), captured once when the commit first reaches the wire.
-Blank on PR/issue rows and on empty or binary-only commits.
-
 Toggle it live with `t`, or start it on with `GIT_TIMES_LIVE_TOKENS=on`. The
 usage collect runs asynchronously on its own cadence so the clock never stalls.
 Fail-soft: no jq or no transcripts → the columns just stay blank.
+
+### Churn column
+
+A second **optional, off-by-default** module, independent of the A.I. desk and
+toggled on its own with **`c`** (or `GIT_TIMES_LIVE_CHURN=on`): a cyan **`Δchurn`**
+showing that commit's own churn — the lines it touched (additions + deletions),
+compact (`Δ262`, `Δ48k`, `Δ1M`). Unlike the per-repo token and growth columns
+(identical on every line of a repo), churn is **per commit** and exact, measured
+straight from git (`git show --numstat`, **no jq**), captured once when the commit
+first reaches the wire. Blank on PR/issue rows and on empty or binary-only commits.
+
+The desk and churn columns are fully independent — run churn alone (pure git, no
+jq), the token desk alone, both, or neither. Each toggle only widens or narrows the
+headline column; the feed never shifts rows.
 
 ### Forge events (PR / issue)
 

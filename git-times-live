@@ -10,15 +10,16 @@
 # breaking-news feed under a live clock with a lower-third marquee ticker.
 # It polls git directly — no collect, no cache write — and runs until you quit.
 #
-# Keys:  q quit · r refresh now · p pause · m toggle ticker · t toggle A.I. desk
+# Keys:  q quit · r refresh now · p pause · m toggle ticker · t toggle A.I. desk · c toggle churn
 #
 # Repo discovery: GIT_TIMES_ROOTS (space-separated roots to scan) plus the repo
 # you launch it from. Forge events need .env config (see .env.example).
 #
-# The A.I. desk (inline per-repo assistant tokens + a green "+growth" tag + a cyan
-# per-commit "Δchurn", off by default) is optional. Tokens/growth read your Claude
-# Code transcripts — needs jq; churn is exact, straight from git (no jq). Toggle with
-# t or GIT_TIMES_LIVE_TOKENS.
+# The A.I. desk (inline per-repo assistant tokens + a green "+growth" tag, off by
+# default) is optional — it reads your Claude Code transcripts and needs jq; toggle
+# with t or GIT_TIMES_LIVE_TOKENS. The cyan per-commit "Δchurn" column is a separate
+# optional module, exact and straight from git (no jq); toggle with c or
+# GIT_TIMES_LIVE_CHURN.
 
 set -uo pipefail
 
@@ -62,7 +63,7 @@ Options:
   -h, --help                  this help
       --version               print the generator commit and exit
 
-Keys (while running):  q quit · r refresh now · p pause · m toggle ticker · t A.I. desk
+Keys (while running):  q quit · r refresh now · p pause · m toggle ticker · t A.I. desk · c churn
 
 Repo discovery:
   GIT_TIMES_ROOTS   space-separated roots to scan for repos (plus the cwd repo)
@@ -77,15 +78,20 @@ Tunables (seconds unless noted):
   GIT_TIMES_LIVE_TICKER            start with the ticker running (on|off, default off)
   GIT_TIMES_LIVE_TOKENS            A.I. desk: inline per-repo assistant tokens (on|off, default off)
   GIT_TIMES_LIVE_TOKENS_INTERVAL   A.I. desk poll cadence (default 60)
+  GIT_TIMES_LIVE_CHURN             churn column: inline per-commit Δ lines touched (on|off, default off)
 
 The A.I. desk adds an inline token column to each feed line (that repo total over
 the window) plus a green "+growth" tag — how much the repo has gained since you
-enabled the desk, so you watch each project consume tokens live — and a cyan
-"Δchurn": that commit's own lines touched (additions + deletions), exact and
-per-commit, measured straight from git (no jq). The token/growth pair reads from
-your Claude Code transcripts (default ~/.claude/projects, override with
+enabled the desk, so you watch each project consume tokens live. The pair reads
+from your Claude Code transcripts (default ~/.claude/projects, override with
 GIT_TIMES_USAGE_CLAUDE_DIR) and needs jq. Off by default; when off, no jq ever runs.
 Fail-soft: no jq or no transcripts → the token columns just stay blank.
+
+The churn column (toggle c, or GIT_TIMES_LIVE_CHURN) is separate and independent of
+the A.I. desk: a cyan "Δchurn" showing that commit's own lines touched (additions +
+deletions), exact and per-commit, measured straight from git — no jq. Each column
+toggles on its own, so you can run churn alone, the token desk alone, both, or
+neither.
 
 Forge config (PR/issue events) goes in .env — see .env.example for placeholders.
 EOF
