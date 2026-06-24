@@ -360,6 +360,16 @@ live_broadcast() {
     _live_on_new() {
         _live_render_feed; _live_ticker_build; flash_until=$(( now + LV_FLASH )); printf '\a'
     }
+    # Catch up the gap up to `now`: poll local commits over [last_local, now] (flashing
+    # on new) and kick a remote poll for [last_remote, now] — the incremental gap, never
+    # the full lookback. Shared verbatim by the r refresh and the p-unpause path, which
+    # both mean "poll everything for the gap right now". One place is the point: the
+    # unpause-loses-commits bug was a drift between these two sites. The TICK cadence path
+    # stays separate (it is interval-gated, not "right now"). dedup keeps it idempotent.
+    _live_catchup() {
+        [ "$SCOPE" != remote ] && { _live_poll_local "$last_local"; last_local="$now"; [ "$LV_NEW" -gt 0 ] && _live_on_new; }
+        if [ "$SCOPE" != local ] && [ -z "$LV_REMOTE_PID" ]; then _live_remote_start "$last_remote" "$now" && last_remote="$now"; fi
+    }
 
     # ── A.I. desk: per-repo assistant tokens, polled ASYNC (the one jq path here) ──
     # Same async discipline as the remote poll: collect-usage-claude.sh (Claude Code
@@ -698,12 +708,24 @@ EOF
         printf '%s' "$out"
     }
 
+    # ── cleanup: run at every exit path (the trap + the normal end below) ──────
+    # Reap any background job, restore termios + the paper surface, show the cursor,
+    # LEAVE the alt screen (restoring the user's prior terminal content). One helper so
+    # the trap and the normal end can never drift; idempotent (every var ${..:-}-guarded),
+    # so running it twice — trap then fall-through — is safe. Defined before the trap is
+    # installed, so it always exists when a signal fires. Same discipline as reader.sh.
+    _live_cleanup() {
+        [ -n "${LV_REMOTE_PID:-}" ] && kill "$LV_REMOTE_PID" 2>/dev/null
+        [ -n "${LV_REMOTE_PF:-}" ] && rm -f "$LV_REMOTE_PF" 2>/dev/null
+        [ -n "${LV_TOK_PID:-}" ] && kill "$LV_TOK_PID" 2>/dev/null
+        [ -n "${LV_TOK_PF:-}" ] && rm -f "$LV_TOK_PF" 2>/dev/null
+        [ -n "${_stty_saved:-}" ] && stty "$_stty_saved" </dev/tty 2>/dev/null
+        gn_term_surface_reset
+        printf '\033[0m\033[?25h\033[?1049l'
+    }
+
     # ── terminal setup: alt screen + hide cursor + silence echo ────────────────
-    # Cleanup mirrors reader.sh: reap any background job, restore termios + the
-    # paper surface, show the cursor, LEAVE the alt screen (restoring the user's
-    # prior terminal content) — at every exit path (trap + the normal end below).
-    # The body is idempotent (every var ${..:-}-guarded) so running it twice is safe.
-    trap '[ -n "${LV_REMOTE_PID:-}" ] && kill "$LV_REMOTE_PID" 2>/dev/null; [ -n "${LV_REMOTE_PF:-}" ] && rm -f "$LV_REMOTE_PF" 2>/dev/null; [ -n "${LV_TOK_PID:-}" ] && kill "$LV_TOK_PID" 2>/dev/null; [ -n "${LV_TOK_PF:-}" ] && rm -f "$LV_TOK_PF" 2>/dev/null; [ -n "${_stty_saved:-}" ] && stty "$_stty_saved" </dev/tty 2>/dev/null; gn_term_surface_reset; printf "\033[0m\033[?25h\033[?1049l"; exit 0' INT TERM HUP QUIT
+    trap '_live_cleanup; exit 0' INT TERM HUP QUIT
     trap 'LV_RESIZE=1' WINCH
     printf '\033[?1049h\033[?25l'   # enter alternate screen, hide cursor
     [ -n "${GN_TERM_BG:-}" ] && gn_term_surface_apply   # paper/black surface themes (reset on exit)
@@ -745,10 +767,9 @@ EOF
         gn_readkey_v key "$LV_TICK"
         case "$key" in
             ''|q|Q|ESC) break ;;
-            r|R) # manual refresh: poll local now + kick a fresh remote poll
+            r|R) # manual refresh: poll local + kick a fresh remote poll for the gap now
                  printf -v now '%(%s)T' -1
-                 [ "$SCOPE" != remote ] && { _live_poll_local "$last_local"; last_local="$now"; [ "$LV_NEW" -gt 0 ] && _live_on_new; }
-                 if [ "$SCOPE" != local ] && [ -z "$LV_REMOTE_PID" ]; then _live_remote_start "$last_remote" "$now" && last_remote="$now"; fi ;;   # incremental gap, not the full lookback
+                 _live_catchup ;;
             TICK)
                 printf -v now '%(%s)T' -1
                 LV_TICKOFF=$(( LV_TICKOFF + 1 ))
@@ -789,13 +810,11 @@ EOF
                     fi
                 fi ;;
             p|P) if [ "$paused" = 1 ]; then
-                     # unpause: catch up the paused span now — poll local over [last_local, now]
-                     # and kick a remote poll for the gap — so nothing committed while frozen is
-                     # lost (the old re-anchor advanced the cadence WITHOUT polling, a permanent
-                     # miss). dedup keeps the catch-up sweep idempotent.
+                     # unpause: catch up the paused span now (poll local + kick remote for the
+                     # gap) so nothing committed while frozen is lost — the old re-anchor advanced
+                     # the cadence WITHOUT polling, a permanent miss.
                      paused=0; printf -v now '%(%s)T' -1
-                     [ "$SCOPE" != remote ] && { _live_poll_local "$last_local"; last_local="$now"; [ "$LV_NEW" -gt 0 ] && _live_on_new; }
-                     if [ "$SCOPE" != local ] && [ -z "$LV_REMOTE_PID" ]; then _live_remote_start "$last_remote" "$now" && last_remote="$now"; fi
+                     _live_catchup
                      _live_render_feed; _live_ticker_build   # reflect the catch-up + anything a paused reap merged
                  else
                      # freeze the feed (the clock keeps moving); clear the flash so the BREAKING
@@ -832,12 +851,6 @@ EOF
         esac
     done
 
-    # ── normal-exit cleanup (mirrors the trap) ─────────────────────────────────
-    [ -n "${LV_REMOTE_PID:-}" ] && kill "$LV_REMOTE_PID" 2>/dev/null
-    [ -n "${LV_REMOTE_PF:-}" ] && rm -f "$LV_REMOTE_PF" 2>/dev/null
-    [ -n "${LV_TOK_PID:-}" ] && kill "$LV_TOK_PID" 2>/dev/null
-    [ -n "${LV_TOK_PF:-}" ] && rm -f "$LV_TOK_PF" 2>/dev/null
-    [ -n "${_stty_saved:-}" ] && stty "$_stty_saved" </dev/tty 2>/dev/null
-    gn_term_surface_reset
-    printf '\033[0m\033[?25h\033[?1049l'
+    # ── normal-exit cleanup (the same helper the trap runs) ────────────────────
+    _live_cleanup
 }
