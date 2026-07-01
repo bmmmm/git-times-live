@@ -9,6 +9,9 @@ lower-third marquee ticker.
 It polls git directly — **no collect, no cache write** — and stays open until
 you quit.
 
+**See it move:** <https://bmmmm.github.io/git-times-live> — the channel page,
+rendered live in your browser.
+
 ## Install
 
 No build step, no runtime dependencies beyond **bash 4+** and **git** (plus

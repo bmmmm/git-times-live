@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THE GIT TIMES · LIVE — a broadcast TV channel for your git activity</title>
+<meta name="description" content="A standalone live broadcast TV channel for your git activity. Tick-driven full-screen news view, breaking-news feed, lower-third marquee. Pure bash + git — no build, no daemons, no cache.">
+<link rel="canonical" href="https://github.com/bmmmm/git-times-live">
+<meta property="og:title" content="THE GIT TIMES · LIVE">
+<meta property="og:description" content="A live broadcast TV channel for your git activity. Pure bash + git. No build, no daemons, no cache.">
+<meta property="og:type" content="website">
+<style>
+  /* the channel's default `neon` palette, verbatim from the terminal (xterm-256 → hex) */
+  :root {
+    --bg:    #0a0812;
+    --panel: #120f1e;
+    --fg:    #c6c6c6;   /* GN_DIM   251 */
+    --faint: #585858;   /* GN_FAINT 240 */
+    --red:   #ff5f5f;   /* GN_RED   203 */
+    --grn:   #00ff87;   /* GN_GRN    48 */
+    --yel:   #ffd700;   /* GN_YEL   220 */
+    --blu:   #00afff;   /* GN_BLU    39 */
+    --mag:   #af87ff;   /* GN_MAG   141 */
+    --hero:  #ff00ff;   /* GN_CYN   201 — the neon wordmark ink */
+    --line:  #241d38;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    background-image: radial-gradient(ellipse 80% 50% at 50% -10%, #1c1032 0%, transparent 60%);
+    color: var(--fg);
+    font: 15px/1.6 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  a { color: var(--grn); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  h1 {
+    font-size: 2.3rem; margin: 0; font-weight: 700; letter-spacing: -.5px;
+    color: var(--hero); text-shadow: 0 0 18px rgba(255,0,255,.45);
+  }
+  h1 .live { color: var(--fg); text-shadow: none; }
+  h1 .cursor { color: var(--grn); animation: blink 1.1s steps(1) infinite; text-shadow: 0 0 14px rgba(0,255,135,.5); }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tag { color: var(--faint); margin: .4rem 0 2.2rem; font-size: .95rem; }
+  .tag b { color: var(--fg); font-weight: 600; }
+
+  /* ── the screen ─────────────────────────────────────────────────────────── */
+  .screen {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    box-shadow: 0 0 40px rgba(255,0,255,.08), 0 0 80px rgba(0,255,135,.05);
+  }
+  .screen pre { margin: 0; white-space: pre; font-size: 13px; line-height: 1.55; }
+  /* CRT scanlines — the funk layer */
+  .screen::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 10px;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+
+  .hero-cap { color: var(--faint); font-size: .8rem; text-align: center; margin: .6rem 0 2.6rem; }
+  .hero-cap b { color: var(--fg); }
+
+  /* palette inks */
+  .hero { color: var(--hero); font-weight: 700; }
+  .g { color: var(--grn); } .r { color: var(--red); } .y { color: var(--yel); }
+  .b { color: var(--blu); } .m { color: var(--mag); } .d { color: var(--faint); }
+  .fg { color: var(--fg); } .bold { font-weight: 700; }
+
+  /* rec dot: grey, flips red on even seconds (JS) */
+  .rec { color: var(--faint); }
+  .rec.on { color: var(--red); font-weight: 700; text-shadow: 0 0 10px rgba(255,95,95,.7); }
+
+  /* banner: BREAKING pulses red for the flash window, then ON AIR holds steady */
+  .banner { position: relative; display: block; height: 1.55em; }
+  .banner span { position: absolute; inset: 0; white-space: pre; }
+  .b-breaking {
+    background: var(--red); color: var(--bg); font-weight: 700;
+    animation: breaking 14s steps(1) infinite;
+  }
+  .b-onair {
+    background: var(--hero); color: var(--bg); font-weight: 700;
+    animation: onair 14s steps(1) infinite;
+  }
+  /* flash for 6s of every 14 (pulse ~0.5s), ON AIR for the rest — same cadence as the channel */
+  @keyframes breaking {
+    0%,7%,14%,21%,28%,35% { opacity: 1; }
+    3.5%,10.5%,17.5%,24.5%,31.5%,42%,100% { opacity: 0; }
+  }
+  @keyframes onair { 0% { opacity: 0; } 42% { opacity: 1; } 100% { opacity: 1; } }
+
+  /* lower-third marquee: an endless loop, duplicated text for a seamless wrap */
+  .marquee { display: block; overflow: hidden; }
+  .marquee > span { display: inline-block; white-space: pre; color: var(--faint); animation: crawl 28s linear infinite; }
+  @keyframes crawl { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor, .b-breaking, .b-onair, .marquee > span { animation: none; }
+    .b-breaking { opacity: 0; }
+  }
+
+  h2 {
+    font-size: .8rem; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--faint); margin: 2.8rem 0 1rem; font-weight: 600;
+  }
+  h2::before { content: "◉ "; color: var(--hero); }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: .9rem 1rem; overflow-x: auto; margin: 0;
+  }
+  .panel pre { margin: 0; white-space: pre; font-size: 13px; line-height: 1.5; }
+  .prompt { color: var(--faint); }
+
+  .cards { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .card { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; }
+  .card .cmd { color: var(--faint); font-size: .8rem; margin: 0 0 .5rem; }
+  .card .cmd b { color: var(--grn); font-weight: 600; }
+  .card .panel { flex: 1; }
+  .card p.blurb { color: var(--faint); font-size: .85rem; margin: .6rem 0 0; }
+  .card p.blurb b { color: var(--fg); }
+
+  .themes { display: flex; flex-wrap: wrap; gap: .5rem .9rem; font-weight: 700; font-size: 1.05rem; }
+  .themes span { text-shadow: 0 0 12px currentColor; }
+
+  ul.zero { list-style: none; padding: 0; margin: 0; }
+  ul.zero li { margin: 0 0 .55rem; }
+  ul.zero li::before { content: "▌ "; color: var(--grn); }
+  ul.zero b { color: var(--fg); }
+
+  .links { margin: 2.8rem 0 0; display: flex; flex-wrap: wrap; gap: 1.2rem; }
+  footer {
+    margin-top: 2.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+    color: var(--faint); font-size: .85rem;
+    display: flex; flex-wrap: wrap; gap: .4rem 1rem; justify-content: space-between;
+  }
+  .badges b { color: var(--grn); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>THE GIT TIMES <span class="live">· LIVE</span><span class="cursor">█</span></h1>
+  <p class="tag"><b>A broadcast TV channel for your git activity.</b><br>
+     breaking-news feed · live clock · lower-third marquee · pure bash + git · no daemons, no cache</p>
+
+  <!-- the channel, rendered live in the browser: real clock, blinking rec dot,
+       pulsing BREAKING banner, crawling marquee — the same chrome the terminal draws -->
+  <div class="screen"><pre><span class="hero">THE GIT TIMES</span><span class="d"> · LIVE</span>                                                                            <span id="rec" class="rec">◉</span> <span class="fg bold" id="clk">21:42:07</span>
+<span class="d">──────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="banner"><span class="b-breaking"> BREAKING · git-times — feat: extract _live_catchup/_live_cleanup                                         </span><span class="b-onair"> ON AIR · git-times — feat: extract _live_catchup/_live_cleanup                                           </span></span><span class="bold fg">TIME   </span> <span class="bold fg">REPO          </span> <span class="y bold">TOKENS</span> <span class="g bold">+GROWTH</span> <span class="m bold">CHURN</span> <span class="bold fg">HEADLINE</span>
+<span class="d">21:42</span> <span class="g">▌</span> <span class="fg bold">git-times     </span> <span class="y">  1.2M</span> <span class="g">+48k   </span> <span class="m">Δ262 </span> <span class="d">feat: extract _live_catchup/_live_cleanup</span>
+<span class="d">21:37</span> <span class="b">⬡</span> <span class="fg bold">homelab       </span> <span class="y">      </span> <span class="g">       </span> <span class="m">     </span> <span class="d">PR #42 opened · tighten reverse-proxy headers</span>
+<span class="d">21:31</span> <span class="r">▌</span> <span class="fg bold">claudii       </span> <span class="y">  842k</span> <span class="g">+12k   </span> <span class="m">Δ48  </span> <span class="d">fix: cache hit-rate off-by-one in sessionline</span>
+<span class="d">21:24</span> <span class="m">▌</span> <span class="fg bold">git-times     </span> <span class="y">  1.2M</span> <span class="g">+48k   </span> <span class="m">Δ1.1k</span> <span class="d">refactor: persist t/c toggles across runs</span>
+<span class="d">21:18</span> <span class="m">◆</span> <span class="fg bold">side-quest    </span> <span class="y">      </span> <span class="g">       </span> <span class="m">     </span> <span class="d">issue #7 · marquee speed should follow TICK</span>
+<span class="d">21:03</span> <span class="y">▌</span> <span class="fg bold">dotfiles      </span> <span class="y">   96k</span> <span class="g">       </span> <span class="m">Δ12  </span> <span class="d">chore: prune dead aliases</span>
+<span class="d">20:55</span> <span class="g">▌</span> <span class="fg bold">claudii       </span> <span class="y">  842k</span> <span class="g">+12k   </span> <span class="m">Δ390 </span> <span class="d">feat: vibemap grid — when you actually code</span>
+<span class="d">20:41</span> <span class="b">▌</span> <span class="fg bold">tiny-rss      </span> <span class="y">   14k</span> <span class="g">       </span> <span class="m">Δ88  </span> <span class="d">docs: self-host quickstart</span>
+<span class="d">20:36</span> <span class="g">▌</span> <span class="fg bold">homelab       </span> <span class="y">  310k</span> <span class="g">+2.1k  </span> <span class="m">Δ174 </span> <span class="d">feat: one compose file to rule the lab</span>
+<span class="d">──────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="marquee"><span>+++  THE GIT TIMES · LIVE  +++  9 on the wire  +++  latest · git-times — feat: extract _live_catchup/_live_cleanup  +++  monitoring 12 repos  +++  THE GIT TIMES · LIVE  +++  9 on the wire  +++  latest · git-times — feat: extract _live_catchup/_live_cleanup  +++  monitoring 12 repos  </span></span><span class="d"> ◉ </span><span class="g bold">LIVE</span><span class="d"> · 12 repos · poll 10s · 9 on the wire   q quit · r refresh · p pause · m ticker · t a.i. · c churn</span></pre></div>
+  <p class="hero-cap">rendered live in your browser — the real thing runs full-screen in your terminal,
+  polls git directly, and stays open until you quit</p>
+
+  <h2>Install</h2>
+  <div class="panel"><pre><span class="prompt">$</span> git clone https://github.com/bmmmm/git-times-live && cd git-times-live
+<span class="prompt">$</span> ./git-times-live                 <span class="d"># that's it — no build step, bash 4+ and git only</span>
+
+<span class="prompt">$</span> ln -s "$PWD/git-times-live" ~/.local/bin/git-times-live   <span class="d"># optional: on your PATH</span></pre></div>
+
+  <h2>Tune the channel</h2>
+  <div class="panel"><pre><span class="prompt">$</span> ./git-times-live --scope local   <span class="d"># commits only, zero network</span>
+<span class="prompt">$</span> ./git-times-live --mine          <span class="d"># only your own commits</span>
+<span class="prompt">$</span> ./git-times-live --theme matrix  <span class="d"># pick an accent palette</span>
+<span class="prompt">$</span> GIT_TIMES_ROOTS="~/code ~/work" ./git-times-live   <span class="d"># where to scan for repos</span>
+
+  <span class="fg bold">q</span> <span class="d">quit</span>   <span class="fg bold">r</span> <span class="d">refresh now</span>   <span class="fg bold">p</span> <span class="d">pause / resume</span>   <span class="fg bold">m</span> <span class="d">lower-third ticker</span>
+  <span class="fg bold">t</span> <span class="d">A.I. desk (inline tokens)</span>   <span class="fg bold">c</span> <span class="d">churn column (per-commit Δ)</span>   <span class="d">— t/c remembered across runs</span></pre></div>
+
+  <h2>Two optional desks, off by default</h2>
+  <div class="cards">
+    <div class="card">
+      <p class="cmd">press <b>t</b> — the A.I. desk: <span class="y">TOKENS</span> · <span class="g">+GROWTH</span></p>
+      <div class="panel"><pre><span class="d">21:42</span> <span class="g">▌</span> <span class="fg bold">git-times     </span> <span class="y">  1.2M</span> <span class="g">+48k   </span> <span class="d">feat: extract _live_catchup…</span>
+<span class="d">21:31</span> <span class="r">▌</span> <span class="fg bold">claudii       </span> <span class="y">  842k</span> <span class="g">+12k   </span> <span class="d">fix: cache hit-rate off-by-…</span></pre></div>
+      <p class="blurb">Every feed line gains that repo's <b>assistant-token total</b>, read from your local
+      Claude Code transcripts, plus a green <b>+growth</b> delta since you enabled the desk —
+      watch each project consume tokens in real time. The only part that needs <b>jq</b>;
+      fail-soft, columns stay blank without it.</p>
+    </div>
+    <div class="card">
+      <p class="cmd">press <b>c</b> — the churn column: <span class="m">Δ lines touched</span></p>
+      <div class="panel"><pre><span class="d">21:42</span> <span class="g">▌</span> <span class="fg bold">git-times     </span> <span class="m">Δ262 </span> <span class="d">feat: extract _live_catchup/_live_cl…</span>
+<span class="d">21:24</span> <span class="m">▌</span> <span class="fg bold">git-times     </span> <span class="m">Δ1.1k</span> <span class="d">refactor: persist t/c toggles across…</span></pre></div>
+      <p class="blurb"><b>Per commit and exact</b>, straight from <b>git show --numstat</b> — additions +
+      deletions, compact (Δ262, Δ48k, Δ1M), captured once when the commit reaches the wire.
+      Pure git, no jq. Fully independent of the A.I. desk: run either, both, or neither.</p>
+    </div>
+  </div>
+
+  <h2>Forge events ride the wire too</h2>
+  <p style="color:var(--faint); margin:.2rem 0 0">Configure a forge (<b style="color:var(--fg)">Forgejo · GitHub · GitLab</b>)
+  in a gitignored <b style="color:var(--fg)">.env</b> and PR <span class="b">⬡</span> / issue <span class="m">◆</span> events break into the
+  feed between your commits. Or run <b style="color:var(--fg)">--scope local</b> and the channel never touches the network.</p>
+
+  <h2>Nine palettes, cycle any time</h2>
+  <div class="themes">
+    <span style="color:#ff00ff">neon</span>
+    <span style="color:#af87ff">dracula</span>
+    <span style="color:#ff8700">gruvbox</span>
+    <span style="color:#00ff00">matrix</span>
+    <span style="color:#ff0087">miami</span>
+    <span style="color:#87afff">tokyo</span>
+    <span style="color:#ff5f00">ember</span>
+    <span style="color:#ff87d7">uwu</span>
+    <span style="color:#8a8a8a">mono</span>
+  </div>
+
+  <h2>Zero everything</h2>
+  <ul class="zero">
+    <li><b>No build step</b> — clone and run; bash 4+ and git are the whole dependency list</li>
+    <li><b>No daemons, no cache writes</b> — polls git directly, state lives on the screen</li>
+    <li><b>No telemetry</b> — with <b>--scope local</b> nothing ever leaves your machine</li>
+    <li><b>Fork-free heartbeat</b> — the per-tick frame spawns no subshell; your fans stay quiet</li>
+    <li><b>Leak-scanned dist</b> — the generator greps every release for tokens, keys and home paths</li>
+  </ul>
+
+  <h2>Provenance</h2>
+  <p style="color:var(--faint); margin:.2rem 0 0">This repo is <b style="color:var(--fg)">generated</b>: every file is copied
+  verbatim from the tested <b style="color:var(--fg)">git-times</b> source tree by its build script, with the exact source
+  commit pinned in <b style="color:var(--fg)">MANIFEST.generated</b>. Don't hand-edit — regenerate.</p>
+
+  <div class="links">
+    <a href="https://github.com/bmmmm/git-times-live">→ source &amp; docs</a>
+    <a href="https://github.com/bmmmm/git-times-live#configuration">→ all tunables</a>
+    <a href="https://ko-fi.com/bmabma">→ ko-fi</a>
+  </div>
+
+  <footer>
+    <span class="badges"><b>pure bash + git</b> · no build · no daemons · jq only for the A.I. desk</span>
+    <span><a href="https://github.com/bmmmm/git-times-live/blob/main/LICENSE">GPL-3.0</a></span>
+  </footer>
+
+</main>
+<script>
+  // the masthead is live: wall clock + the rec dot blinking red on even seconds,
+  // exactly like the channel's heartbeat
+  (function () {
+    var clk = document.getElementById('clk'), rec = document.getElementById('rec');
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    function tick() {
+      var d = new Date();
+      clk.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+      rec.className = d.getSeconds() % 2 === 0 ? 'rec on' : 'rec';
+    }
+    tick(); setInterval(tick, 250);
+  })();
+</script>
+</body>
+</html>
