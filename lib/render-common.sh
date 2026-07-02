@@ -160,7 +160,7 @@ gn_endmark() {
 # runs up front so a truncated cache fails with ONE actionable line instead of a
 # jq parse error per read — straight into the .zshrc greeting on each shell open.
 gn_require_snapshot() {  # gn_require_snapshot <path>
-    [ -n "${1:-}" ] && [ -f "$1" ] || { printf 'git-times: no snapshot to render.\n' >&2; exit 1; }
+    [ -n "${1:-}" ] && [ -f "$1" ] || { printf 'git-times: no snapshot to render — run: git-times collect\n' >&2; exit 1; }
     # Parse AND shape in one pass: a valid-JSON-but-wrong-shape cache (a bare [], a
     # wrong-typed field from a manual edit or external overwrite) would pass a plain
     # `jq -e .` and then spray raw "Cannot index array with string" per section while

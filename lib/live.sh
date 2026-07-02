@@ -128,7 +128,7 @@ live_broadcast() {
     # (the session baseline); LV_TOK_DELTA (repo -> humanized "+growth") is current minus
     # baseline, shown green beside the total so you watch each repo grow live. Only set
     # while LV_TOK_BASELINED=1 and the growth is positive.
-    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_READY=0 LV_TOK_BASELINED=0
+    local LV_TOK_PID="" LV_TOK_PF="" last_tokens=0 LV_TOK_BASELINED=0
     local -a LV_TOK_ROWS=()
     local -A LV_TOK_MAP=() LV_TOK_CUR=() LV_TOK_BASE=() LV_TOK_DELTA=()
     # Cached chrome: the banner inner + status bar measure non-ASCII glyphs (·/◉), so
@@ -225,8 +225,9 @@ live_broadcast() {
     # US-field). The caller appends every fresh record WITHOUT counting it; the count is
     # settled HERE, after the cap, so a capped-out add never arms the BREAKING flash over
     # a frame in which nothing new actually shows, and a dropped key does not linger in
-    # LV_SEEN (its growth tracks the wire, not the whole session) nor stay permanently
-    # invisible — a later poll can resurface it once the wire has room.
+    # LV_SEEN or its cached LV_CHURN entry (both track the wire, not the whole session, so
+    # neither grows unbounded on a long-running channel) nor stay permanently invisible —
+    # a later poll can resurface it once the wire has room.
     _live_feed_sort() {  # _live_feed_sort [key...]  → sets LV_NEW = appended keys still visible
         local -a added=( "$@" )
         LV_NEW=0
@@ -236,7 +237,7 @@ live_broadcast() {
         mapfile -t kept < <(printf '%s\n' "${LV_FEED[@]}" | sort -s -t"$GN_US" -k1,1nr | head -n "$LV_FEEDMAX")
         local -A vis=(); local rec key k
         for rec in "${kept[@]}"; do key="${rec##*"$GN_US"}"; vis[$key]=1; done
-        for rec in "${LV_FEED[@]}"; do key="${rec##*"$GN_US"}"; [ -n "${vis[$key]:-}" ] || unset 'LV_SEEN[$key]'; done
+        for rec in "${LV_FEED[@]}"; do key="${rec##*"$GN_US"}"; [ -n "${vis[$key]:-}" ] || unset 'LV_SEEN[$key]' 'LV_CHURN[$key]'; done
         LV_FEED=( "${kept[@]}" )
         for k in "${added[@]}"; do [ -n "${vis[$k]:-}" ] && LV_NEW=$(( LV_NEW + 1 )); done
     }
@@ -409,7 +410,7 @@ live_broadcast() {
         LV_TOK_ROWS=()
         [ -n "$LV_TOK_PF" ] && [ -s "$LV_TOK_PF" ] && mapfile -t LV_TOK_ROWS < "$LV_TOK_PF"
         [ -n "$LV_TOK_PF" ] && rm -f "$LV_TOK_PF" 2>/dev/null
-        LV_TOK_PF=""; LV_TOK_READY=1
+        LV_TOK_PF=""
         _live_tokens_build
         # Freeze the session baseline on the FIRST real collect after the desk is enabled,
         # so the "+Δ" tag measures growth since you started watching, not the whole 24h

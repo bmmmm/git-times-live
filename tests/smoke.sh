@@ -123,12 +123,46 @@ scan() {  # scan <pattern> <label>
 # matching a loose "sk-") cannot self-flag.
 scan '/Users/'                 'home path'
 scan '/home/[a-z]'             'home path'
-scan 'git\.6bm\.de'            'real forge host'
 scan 'ghp_[A-Za-z0-9]{20,}'    'github token'
 scan 'sk-[A-Za-z0-9]{20,}'     'api key'
 scan 'eyJ[A-Za-z0-9_-]{20,}'   'jwt'
-scan '@qmmq\.de|@brtsz\.de'    'operator email'
+# Operator-specific host/email patterns are NOT hardcoded here: this file is
+# tracked source and ships verbatim into the public standalone, so a literal
+# private forge host / email domain in it would itself be the leak it hunts.
+# Feed your own ERE patterns from the environment (set in a gitignored .env, e.g.
+# GIT_TIMES_LEAK_HOSTS='forge\.example\.com' and GIT_TIMES_LEAK_EMAILS='@you\.tld')
+# and they are scanned too; unset = skipped (the generic scans above still run).
+[ -n "${GIT_TIMES_LEAK_HOSTS:-}" ]  && scan "$GIT_TIMES_LEAK_HOSTS"  'private forge host'
+[ -n "${GIT_TIMES_LEAK_EMAILS:-}" ] && scan "$GIT_TIMES_LEAK_EMAILS" 'operator email'
 [ "$LEAK" = 0 ] && pass "no secret/host/home leak"
+
+# 6. docs/ GitHub Pages contract — the site is published from main:/docs, so a
+#    missing asset or head tag ships broken and nobody notices until someone
+#    actually opens the page. Required files + the social/meta tags README.md
+#    and index.html both promise. (docs/ content is already covered by the
+#    leak scan above since it scans the whole $ROOT tree.)
+DOCS="$ROOT/docs"
+for f in index.html .nojekyll banner.png screenshot-channel.png; do
+    if [ -f "$DOCS/$f" ]; then pass "docs/$f present"; else fail "docs/$f MISSING"; fi
+done
+if [ -f "$DOCS/index.html" ]; then
+    for spec in \
+        '<meta name="viewport"|viewport meta' \
+        '<link rel="canonical"|canonical link' \
+        '<meta property="og:title"|og:title' \
+        '<meta property="og:description"|og:description' \
+        '<meta property="og:image"|og:image' \
+        '<meta property="og:url"|og:url' \
+        '<meta name="twitter:card"|twitter:card'
+    do
+        pattern="${spec%%|*}"; label="${spec##*|}"
+        if grep -qE "$pattern" "$DOCS/index.html"; then
+            pass "docs/index.html has $label"
+        else
+            fail "docs/index.html missing $label"
+        fi
+    done
+fi
 
 printf '\n'
 if [ "$FAIL" = 0 ]; then

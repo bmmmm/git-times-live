@@ -9,7 +9,14 @@
 <meta property="og:title" content="THE GIT TIMES · LIVE">
 <meta property="og:description" content="A live broadcast TV channel for your git activity. Pure bash + git. No build, no daemons, no cache.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://bmmmm.github.io/git-times-live/">
 <meta property="og:image" content="https://bmmmm.github.io/git-times-live/banner.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="THE GIT TIMES · LIVE">
+<meta name="twitter:description" content="A live broadcast TV channel for your git activity. Pure bash + git. No build, no daemons, no cache.">
+<meta name="twitter:image" content="https://bmmmm.github.io/git-times-live/banner.png">
 <style>
   /* the channel's default `neon` palette, verbatim from the terminal (xterm-256 → hex) */
   :root {
@@ -126,6 +133,12 @@
   p.prose b { color: var(--fg); }
 
   .themes { display: flex; flex-wrap: wrap; gap: .5rem .9rem; font-weight: 700; font-size: 1.05rem; }
+  .theme-swatch {
+    background: none; border: none; margin: 0; padding: 0;
+    font: inherit; color: inherit; cursor: pointer; -webkit-appearance: none; appearance: none;
+  }
+  .theme-swatch:hover, .theme-swatch:focus-visible { text-decoration: underline; }
+  .theme-swatch[aria-pressed="true"] { text-decoration: underline; text-underline-offset: .28em; }
 
   ul.zero { list-style: none; padding: 0; margin: 0; }
   ul.zero li { margin: 0 0 .55rem; color: var(--mut); }
@@ -210,15 +223,15 @@
 
   <h2>Nine palettes, cycle any time</h2>
   <div class="themes">
-    <span style="color:#ff00ff">neon</span>
-    <span style="color:#af87ff">dracula</span>
-    <span style="color:#ff8700">gruvbox</span>
-    <span style="color:#00ff00">matrix</span>
-    <span style="color:#ff0087">miami</span>
-    <span style="color:#87afff">tokyo</span>
-    <span style="color:#ff5f00">ember</span>
-    <span style="color:#ff87d7">uwu</span>
-    <span style="color:#8a8a8a">mono</span>
+    <button type="button" class="theme-swatch" data-theme="neon" style="color:#ff00ff" aria-pressed="true">neon</button>
+    <button type="button" class="theme-swatch" data-theme="dracula" style="color:#af87ff" aria-pressed="false">dracula</button>
+    <button type="button" class="theme-swatch" data-theme="gruvbox" style="color:#ff8700" aria-pressed="false">gruvbox</button>
+    <button type="button" class="theme-swatch" data-theme="matrix" style="color:#00ff00" aria-pressed="false">matrix</button>
+    <button type="button" class="theme-swatch" data-theme="miami" style="color:#ff0087" aria-pressed="false">miami</button>
+    <button type="button" class="theme-swatch" data-theme="tokyo" style="color:#87afff" aria-pressed="false">tokyo</button>
+    <button type="button" class="theme-swatch" data-theme="ember" style="color:#ff5f00" aria-pressed="false">ember</button>
+    <button type="button" class="theme-swatch" data-theme="uwu" style="color:#ff87d7" aria-pressed="false">uwu</button>
+    <button type="button" class="theme-swatch" data-theme="mono" style="color:#8a8a8a" aria-pressed="false">mono</button>
   </div>
 
   <h2>Zero everything</h2>
@@ -259,6 +272,74 @@
       rec.className = d.getSeconds() % 2 === 0 ? 'rec on' : 'rec';
     }
     tick(); setInterval(tick, 250);
+  })();
+
+  // theme switcher: click a palette name, the whole page's accent inks — hero,
+  // dim, faint, red, green, yellow, blue, magenta — repaint via CSS custom
+  // properties, exactly the six colors gn_color_init() picks per GIT_TIMES_THEME
+  // in lib/gittimes-lib.sh (xterm-256 codes converted to hex; mono's hero/dim/
+  // faint use the same muted grey as its static swatch, not raw ANSI cyan/dim,
+  // to match the theme's deliberately un-accented look).
+  (function () {
+    var PALETTES = {
+      neon:    { dim: '#c6c6c6', faint: '#585858', red: '#ff5f5f', grn: '#00ff87', yel: '#ffd700', blu: '#00afff', mag: '#af87ff', hero: '#ff00ff' },
+      dracula: { dim: '#bcbcbc', faint: '#4e4e4e', red: '#ff8787', grn: '#5fff87', yel: '#ffff87', blu: '#87d7ff', mag: '#ff87d7', hero: '#af87ff' },
+      gruvbox: { dim: '#949494', faint: '#585858', red: '#d75f5f', grn: '#afaf00', yel: '#ffaf00', blu: '#87afaf', mag: '#d787af', hero: '#ff8700' },
+      matrix:  { dim: '#5f875f', faint: '#444444', red: '#ff0000', grn: '#5fff00', yel: '#afff00', blu: '#00ff87', mag: '#87ff87', hero: '#00ff00' },
+      miami:   { dim: '#bcbcbc', faint: '#585858', red: '#ff5f5f', grn: '#00d7af', yel: '#ffaf00', blu: '#00d7ff', mag: '#ff5fff', hero: '#ff0087' },
+      tokyo:   { dim: '#a8a8a8', faint: '#4e4e4e', red: '#ff5f87', grn: '#afd787', yel: '#d7af87', blu: '#8787ff', mag: '#d787d7', hero: '#87afff' },
+      ember:   { dim: '#949494', faint: '#444444', red: '#d70000', grn: '#d7af00', yel: '#ffd700', blu: '#af5f00', mag: '#ff005f', hero: '#ff5f00' },
+      uwu:     { dim: '#d7afd7', faint: '#afafd7', red: '#ffafaf', grn: '#afffd7', yel: '#ffffaf', blu: '#afafff', mag: '#ffafff', hero: '#ff87d7' },
+      mono:    { dim: '#aaaaaa', faint: '#585858', red: '#cd0000', grn: '#00cd00', yel: '#cdcd00', blu: '#0000ee', mag: '#cd00cd', hero: '#8a8a8a' }
+    };
+    var VARS = { dim: '--dim', faint: '--faint', red: '--red', grn: '--grn', yel: '--yel', blu: '--blu', mag: '--mag', hero: '--hero' };
+    var buttons = document.querySelectorAll('.theme-swatch');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var pal = PALETTES[btn.dataset.theme];
+        if (!pal) return;
+        Object.keys(VARS).forEach(function (k) {
+          document.documentElement.style.setProperty(VARS[k], pal[k]);
+        });
+        buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
+      });
+    });
+  })();
+
+  // mobile fit: the hero screen mock and the install/tune panels are fixed-
+  // column terminal renders (up to 106 cols) that would otherwise force
+  // horizontal scrolling on phone viewports — scale each one down (transform,
+  // top-left origin) exactly enough that its widest line fits the container,
+  // recomputed on resize so it snaps back to full size on desktop.
+  (function () {
+    var boxes = document.querySelectorAll('.screen, .panel');
+    function fit(el) {
+      var pre = el.querySelector('pre');
+      if (!pre) return;
+      pre.style.transform = 'none';
+      el.style.height = '';
+      el.style.overflowX = '';
+      el.style.overflowY = '';
+      var cs = getComputedStyle(el);
+      var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      var padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      var avail = el.clientWidth - padX;
+      var scale = Math.min(1, avail / pre.scrollWidth);
+      if (scale < 1) {
+        pre.style.transformOrigin = 'top left';
+        pre.style.transform = 'scale(' + scale + ')';
+        el.style.height = (pre.scrollHeight * scale + padY) + 'px';
+        // a transformed child keeps its PRE-scale box for the parent's scrollable-
+        // overflow calculation (Chrome/Safari), which would otherwise force a
+        // spurious scrollbar and blank space even though the paint fits — the
+        // container is sized correctly above, so overflow-y is safe to suppress too.
+        el.style.overflowX = 'hidden';
+        el.style.overflowY = 'hidden';
+      }
+    }
+    function fitAll() { boxes.forEach(fit); }
+    fitAll();
+    window.addEventListener('resize', fitAll);
   })();
 </script>
 </body>
