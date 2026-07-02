@@ -1,5 +1,5 @@
 git-times-live — GENERATED standalone
-source-commit: 4d0c1ebd4d863620f64b5b3fc237594a9fcb6083
+source-commit: b9d53dc8f5c0142941100eac708d691d9b3cf254
 generator: scripts/build-live-dist.sh (git-times)
 marker: do-not-hand-edit-regenerate
 
@@ -24,7 +24,9 @@ copied files:
   .gitignore
   .claudeignore
   tests/smoke.sh
-  docs/index.html
   docs/.nojekyll
+  docs/banner.png
+  docs/index.html
+  docs/screenshot-channel.png
   LICENSE
   MANIFEST.generated

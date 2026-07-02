@@ -1,5 +1,7 @@
 # git-times-live
 
+![THE GIT TIMES · LIVE](docs/banner.png)
+
 A standalone **live broadcast TV channel** for your git activity. Leave it
 running and it updates itself: a tick-driven, full-screen "TV news" view that
 polls your repos for new commits (and, with a forge configured, PR/issue
@@ -11,6 +13,9 @@ you quit.
 
 **See it move:** <https://bmmmm.github.io/git-times-live> — the channel page,
 rendered live in your browser.
+
+![the channel: masthead with live clock, ON AIR banner, breaking-news feed with
+the A.I. desk and churn columns, lower-third marquee](docs/screenshot-channel.png)
 
 ## Install
 
